@@ -1,0 +1,3 @@
+targets/*/out/
+work/
+node_modules/
