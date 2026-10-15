@@ -1,0 +1,14 @@
+{
+  "name": "nullroom",
+  "version": "1.0.0",
+  "description": "Clean-room reconstruction studio. Two isolated rooms, a spec wall, and a behavioral oracle.",
+  "type": "module",
+  "license": "MIT",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "start": "node --experimental-strip-types src/cli.ts",
+    "test": "node --experimental-strip-types --test src/engine.test.ts"
+  }
+}
