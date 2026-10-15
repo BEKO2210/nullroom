@@ -52,7 +52,64 @@ int main(void) {
     const uint8_t odd[] = {2, 9, 1};
     printf("\"rle_odd\":%d,", sm_rle_decode(odd, sizeof odd, dec, sizeof dec) == SIZE_MAX);
 
-    printf("\"ring_bad\":[%d,%d],", sm_ring_new(0) == NULL, sm_ring_new(5000) == NULL);
+    /* Fixed edge values. */
+    static const int32_t E[] = {0, 1, -1, 99, 100, 101, 255, -255, INT32_MAX, INT32_MIN};
+    const int ne = sizeof E / sizeof E[0];
+
+    printf("\"clamp_edges\":[");
+    for (int i = 0; i < ne; i++)
+        printf(i ? ",%d,%d" : "%d,%d", sm_clamp(E[i], -1, 255), sm_clamp(E[i], 255, -1));
+    printf("],");
+
+    printf("\"score_edges\":[");
+    static const uint32_t F[] = {0, 1, 2, 4, 8, 3, 5, 7, 15, 16};
+    for (int i = 0; i < ne; i++)
+        for (int j = 0; j < 10; j++) printf(i || j ? ",%d" : "%d", sm_score(E[i], F[j]));
+    printf("],");
+
+    uint8_t ones[300];
+    memset(ones, 255, sizeof ones);
+    printf("\"checksum_edges\":[%u,%u,%u,%u]," , sm_checksum(ones, 1), sm_checksum(ones, 255),
+           sm_checksum(ones, 256), sm_checksum(ones, 300));
+
+    /* Runs of 1, 255, 256 equal bytes; encode with capacity exact-1, exact, exact+1. */
+    static const size_t RUNS[] = {1, 255, 256};
+    printf("\"rle_edges\":[");
+    for (int i = 0; i < 3; i++) {
+        size_t need = sm_rle_encode(ones, RUNS[i], enc, sizeof enc);
+        uint8_t out[300];
+        for (int d = -1; d <= 1; d++) {
+            memset(enc, 0, sizeof enc);
+            size_t e = sm_rle_encode(ones, RUNS[i], enc, need + d);
+            memset(out, 0, sizeof out);
+            size_t back = sm_rle_decode(enc, need, out, RUNS[i] + d);
+            printf(i || d != -1 ? ",%d,%d" : "%d,%d", e == SIZE_MAX ? -1 : (int)e,
+                   back == SIZE_MAX ? -1 : (int)back);
+        }
+    }
+    printf("],");
+
+    const uint8_t zero_count[] = {0, 5, 1, 6};
+    printf("\"rle_zero_count\":%d,", sm_rle_decode(zero_count, sizeof zero_count, dec, sizeof dec) == SIZE_MAX);
+
+    /* Ring at capacity 1 and 4096, with extreme values in the running total. */
+    printf("\"ring_edges\":[");
+    static const uint32_t CAPS[] = {1, 4096};
+    for (int c = 0; c < 2; c++) {
+        sm_ring *e = sm_ring_new(CAPS[c]);
+        int32_t last = 0;
+        for (uint32_t k = 0; k < CAPS[c]; k++) last = sm_ring_push(e, k % 2 ? INT32_MAX : INT32_MIN);
+        int32_t full = sm_ring_push(e, 7);
+        int64_t sum = sm_ring_sum(e);
+        int32_t got1 = 0, left = sm_ring_pop(e, &got1);
+        printf(c ? ",%d,%d,%lld,%d,%d,%lld" : "%d,%d,%lld,%d,%d,%lld", last, full, (long long)sum, left, got1,
+               (long long)sm_ring_sum(e));
+        sm_ring_free(e);
+    }
+    printf("],");
+    sm_ring_free(NULL);
+
+    printf("\"ring_bad\":[%d,%d,%d],", sm_ring_new(0) == NULL, sm_ring_new(5000) == NULL, sm_ring_new(4097) == NULL);
     sm_ring *r = sm_ring_new(2);
     int32_t v = -99;
     int32_t p1 = sm_ring_push(r, 4), p2 = sm_ring_push(r, 6), p3 = sm_ring_push(r, 8);

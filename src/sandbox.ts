@@ -16,7 +16,7 @@ import { append } from "./audit.ts";
 export type Room = "A" | "B";
 export type Mount = { host: string; at: string; rw: boolean };
 export type RunResult = { code: number; stdout: string; stderr: string };
-export type RunOpts = { extraRo?: Mount[]; net?: boolean; timeoutMs?: number };
+export type RunOpts = { extraRo?: Mount[]; net?: boolean; timeoutMs?: number; env?: Record<string, string> };
 
 export interface RoomRunner {
   run(room: Room, argv: string[], opts?: RunOpts): RunResult;
@@ -73,7 +73,18 @@ export function bwrapArgs(mounts: Mount[], argv: string[], opts: RunOpts = {}): 
   a.push("--proc", "/proc", "--dev", "/dev", "--tmpfs", "/tmp", "--dir", "/tmp/home");
   for (const m of [...mounts, ...(opts.extraRo ?? [])]) a.push(m.rw ? "--bind" : "--ro-bind", m.host, m.at);
   a.push("--setenv", "PATH", "/usr/local/bin:/usr/bin:/bin", "--setenv", "HOME", "/tmp/home", "--chdir", "/tmp/home");
+  for (const [k, v] of Object.entries(opts.env ?? {})) a.push("--setenv", k, v);
   return [...a, "--", ...argv];
+}
+
+/** One command in a fresh namespace with exactly these mounts. */
+export function jail(mounts: Mount[], argv: string[], opts: RunOpts = {}): RunResult {
+  const r = spawnSync("/usr/bin/bwrap", bwrapArgs(mounts, argv, opts), {
+    encoding: "utf8",
+    timeout: opts.timeoutMs ?? 120_000,
+    env: {},
+  });
+  return { code: r.status ?? -1, stdout: r.stdout ?? "", stderr: r.stderr ?? "" };
 }
 
 export class BwrapRunner implements RoomRunner {
@@ -86,11 +97,7 @@ export class BwrapRunner implements RoomRunner {
 
   run(room: Room, argv: string[], opts: RunOpts = {}): RunResult {
     const mounts = roomMounts(room, this.p);
-    const r = spawnSync("bwrap", bwrapArgs(mounts, argv, opts), {
-      encoding: "utf8",
-      timeout: opts.timeoutMs ?? 120_000,
-    });
-    const res = { code: r.status ?? -1, stdout: r.stdout ?? "", stderr: r.stderr ?? "" };
+    const res = jail(mounts, argv, opts);
     append(this.p.chain, "room-run", {
       room,
       argv,
