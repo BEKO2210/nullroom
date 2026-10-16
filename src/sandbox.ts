@@ -9,7 +9,7 @@
 // Room B's namespace has no mount for the target, so the binary does not exist
 // there at any path.
 import { spawnSync } from "node:child_process";
-import { cpSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, rmSync } from "node:fs";
+import { cpSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, renameSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, posix, resolve } from "node:path";
 import { append } from "./audit.ts";
@@ -120,6 +120,9 @@ export function bwrapArgs(mounts: Mount[], argv: string[], opts: RunOpts = {}): 
   const limits = resolveLimits(opts.limits);
   const allMounts = [...mounts, ...(opts.extraRo ?? [])];
   const writable = allMounts.filter((m) => m.rw);
+  for (const m of writable)
+    if (!/^\/[A-Za-z0-9._-]+(?:\/[A-Za-z0-9._-]+)*$/.test(m.at) || m.at.split("/").includes(".."))
+      throw new Error(`writable mount path not allowed: ${m.at}`);
   const a = ["--unshare-all", "--die-with-parent", "--new-session", "--clearenv"];
   if (opts.net) a.push("--share-net");
   for (const d of SYSTEM_RO) if (existsSync(d)) a.push("--ro-bind", d, d);
@@ -151,16 +154,18 @@ export function bwrapArgs(mounts: Mount[], argv: string[], opts: RunOpts = {}): 
   if (opts.timeoutMs !== undefined) command.unshift("/usr/bin/timeout", "--kill-after=1", String(opts.timeoutMs / 1000));
   const wrapper = [
     "count=$1; shift",
-    "i=0; seed_status=0; : > /tmp/.nullroom-export",
+    // The export list lives in a shell variable, not a file the command could edit.
+    "i=0; seed_status=0; paths=",
     "while [ \"$i\" -lt \"$count\" ]; do",
     "  dest=$1; shift",
     "  cp -a \"/.seed/$i/.\" \"$dest/\" || seed_status=$?",
-    "  printf '%s\\0' \"${dest#/}\" >> /tmp/.nullroom-export",
+    "  paths=\"$paths${dest#/}\n\"",
     "  i=$((i + 1))",
     "done",
     "if [ \"$seed_status\" -eq 0 ]; then \"$@\" 3>&-; command_status=$?; else command_status=$seed_status; fi",
     "kill -9 -1 2>/dev/null || true",
-    "tar -C / -cf - --null --files-from=/tmp/.nullroom-export >&3",
+    "rm -f /tmp/.nullroom-export; printf '%s' \"$paths\" > /tmp/.nullroom-export",
+    "tar -C / -cf - --files-from=/tmp/.nullroom-export >&3",
     "exit \"$command_status\"",
   ].join("\n");
   return [
@@ -213,6 +218,7 @@ function validateArchive(archive: Buffer, writable: Mount[]): string | null {
 function replaceWritableContents(archive: Buffer, writable: Mount[]): string | null {
   if (!writable.length) return null;
   const temp = mkdtempSync(join(tmpdir(), "nullroom-export-"));
+  const staged: { host: string; next: string }[] = [];
   try {
     const extracted = spawnSync(
       "tar",
@@ -226,15 +232,26 @@ function replaceWritableContents(archive: Buffer, writable: Mount[]): string | n
       const st = lstatSync(m.host);
       if (!st.isDirectory() || st.isSymbolicLink()) return `writable host path is not a real directory: ${m.host}`;
     }
+    // Stage every mount next to its host dir first, then swap with rename, so a
+    // failure while copying leaves all host dirs as they were.
     for (const m of writable) {
+      const next = mkdtempSync(`${m.host}.next-`);
+      staged.push({ host: m.host, next });
       const source = join(temp, m.at.replace(/^\/+|\/+$/g, ""));
-      for (const name of readdirSync(m.host)) rmSync(join(m.host, name), { recursive: true, force: true });
-      for (const name of readdirSync(source)) cpSync(join(source, name), join(m.host, name), { recursive: true, dereference: false });
+      for (const name of readdirSync(source)) cpSync(join(source, name), join(next, name), { recursive: true, dereference: false });
     }
+    for (const { host, next } of staged) {
+      const old = `${next}.old`;
+      renameSync(host, old);
+      renameSync(next, host);
+      rmSync(old, { recursive: true, force: true });
+    }
+    staged.length = 0;
     return null;
   } catch (e) {
     return `host replacement failed: ${(e as Error).message}`;
   } finally {
+    for (const { next } of staged) rmSync(next, { recursive: true, force: true });
     rmSync(temp, { recursive: true, force: true });
   }
 }
