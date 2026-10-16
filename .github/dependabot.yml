@@ -8,6 +8,12 @@ updates:
     open-pull-requests-limit: 5
     commit-message:
       prefix: deps
+    ignore:
+      # @types/node must match the minimum supported Node major (engines:
+      # >=22.6), not the newest release, or the typecheck would allow APIs
+      # missing on Node 22. Minor and patch updates within the major are fine.
+      - dependency-name: "@types/node"
+        update-types: ["version-update:semver-major"]
 
   # Keep the SHA-pinned GitHub Actions current (Dependabot updates the pin and
   # the version comment together).
