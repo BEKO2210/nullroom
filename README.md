@@ -77,23 +77,24 @@ target ──ro──▶ Room A ──SPEC.md──▶ Wall ──▶ inbox ─�
   generated from the approved spec, then runs one fixed test driver against
   each library in its own jail and diffs the JSON output.
 
-## Run it
+## Quickstart
 
-Requirements: Linux, `bwrap` (bubblewrap), `gcc`, `systemd` user session with
-cgroup v2 delegation (default on Ubuntu 24.04 desktops), Node 22.6+.
+Linux only. Prerequisites and tested versions: [docs/DEPENDENCIES.md](docs/DEPENDENCIES.md).
 
 ```bash
+git clone https://github.com/BEKO2210/nullroom && cd nullroom
 npm ci
-targets/smoke/build.sh
-npm run typecheck
-npm test                  # wall, audit, jails, limits, oracle, pipeline
-npm run pipeline
-npm run verify work/smoke
+npm run doctor            # checks bwrap, user namespaces, cgroup scope, Yama, tools
+targets/smoke/build.sh    # builds and strips the sample library
+npm test
+npm run demo              # five real steps: isolation, wall, oracle, tamper detection
 ```
 
-On a server without a user session: `sudo loginctl enable-linger $USER`. If
-unprivileged user namespaces are blocked by AppArmor (Ubuntu 24.04 default on
-some images), CI shows the sysctl it sets.
+Every `FAIL` from `doctor` prints its fix; more in
+[docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md). CLI help:
+`npx nullroom --help` (commands `pipeline`, `verify`, `doctor`; exit codes
+0 ok, 1 failure, 2 usage). Releases and how to verify them:
+[docs/RELEASING.md](docs/RELEASING.md), [CHANGELOG.md](CHANGELOG.md).
 
 ## Scope and limits
 
