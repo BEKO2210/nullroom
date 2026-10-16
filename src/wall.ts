@@ -22,6 +22,10 @@ const RULES: { re: RegExp; reason: string }[] = [
   { re: /(?:[=(){}\]][^;]*;\s*$|^\s*[{}]\s*$|\b(?:if|while|for|switch|return)\s*\(|\w+->\w+|\w+\s*\[[^\]]*\]\s*=)/, reason: "code-shaped line" },
 ];
 
+// A run of six or more hex characters with at least one digit inside a name,
+// e.g. a parameter called x401a2f0, would carry an address through the ABI.
+const IDENT_RULE = { re: /(?=[0-9a-f]*\d)[0-9a-f]{6,}/i, reason: "hex-like run in identifier" };
+
 export function scanWall(spec: string): WallReport {
   const hits: WallHit[] = [];
   const lines = spec.split(/\r?\n/);
@@ -43,7 +47,12 @@ export function scanWall(spec: string): WallReport {
   let inFence = false;
   lines.forEach((text, idx) => {
     const n = idx + 1;
-    if (idx >= abiRange[0] && idx < abiRange[1]) return; // grammar-checked above
+    if (idx >= abiRange[0] && idx < abiRange[1]) {
+      // Grammar-checked above, but names are free text: run the content rules too.
+      const hit = [...RULES, IDENT_RULE].find((r) => r.re.test(text));
+      if (hit) hits.push({ line: n, reason: `abi: ${hit.reason}`, text });
+      return;
+    }
     if (/^\s*```/.test(text)) {
       if (idx === abiRange[0] - 1 || idx === abiRange[1]) return;
       inFence = !inFence;

@@ -113,3 +113,22 @@ test("audit: edited or removed entries break the chain", () => {
   writeFileSync(chain, JSON.stringify(dropped));
   assert.equal(verifyChain(chain).ok, false);
 });
+
+test("wall: abi names are scanned like prose (regression)", () => {
+  const smuggle = (from: string, to: string) => {
+    assert.ok(SPEC.includes(from));
+    return scanWall(SPEC.replace(from, to));
+  };
+  const cases: [string, string, string][] = [
+    ["i32 x, i32 lo", "i32 FUN_00101140, i32 lo", "abi: decompiler label"],
+    ["i32 x, i32 lo", "i32 iVar1, i32 lo", "abi: decompiler identifier"],
+    ["i32 x, i32 lo", "i32 rdi, i32 lo", "abi: register name"],
+    ["i32 x, i32 lo", "i32 x401a2f0, i32 lo", "abi: hex-like run in identifier"],
+    ["fn sm_score(", "fn sm_score_7f454c46(", "abi: hex-like run in identifier"],
+  ];
+  for (const [from, to, reason] of cases) {
+    const r = smuggle(from, to);
+    assert.equal(r.ok, false, to);
+    assert.equal(r.hits[0]!.reason, reason, to);
+  }
+});
