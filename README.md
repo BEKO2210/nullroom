@@ -50,7 +50,7 @@ PASSED
 | What was checked is what crossed | `SPEC.md` is read once without following symlinks; those exact bytes are scanned, hashed and copied. | `symlinked SPEC.md in the outbox is refused …` |
 | Room B's code never runs on the host | Builds and runs happen in jails with no network, no `/home`, empty environment; original and rebuild never share a jail. | `oracle jail: no host environment, no /home, only one library` |
 | A jail cannot exhaust the host | Per process (`prlimit`) and per jail (cgroup v2 scope): memory, tasks, CPU, file size, open files. | `jail memory limit holds across processes, not just per process` and the other `jail …` tests in `test/sandbox.test.ts` |
-| A jail cannot fill the host disk | Writable mounts and `/tmp` are size-limited tmpfs; the result is exported as a checked archive (regular files and directories inside the mounts only) and swapped in atomically. | `jail bounds total writable storage, with a larger-limit control`, `jail refuses a symlink export …` |
+| A jail cannot fill the host disk | Writable mounts and `/tmp` are size-limited tmpfs; the result is exported as a checked archive (regular files and directories inside the mounts only) and swapped in with `rename`, atomically per mount (not across several mounts). | `jail bounds total writable storage, with a larger-limit control`, `jail refuses a symlink export …` |
 | The record is tamper-evident | Hash chain over every room run, crossing and verdict; inbox files are checked against it. | `audit: edited or removed entries break the chain`, `tampering with the inbox after the run is detected` |
 | CI results have provenance | `report.json` and `audit_chain.json` are attested with Sigstore on `main`. | `gh attestation verify report.json -R BEKO2210/nullroom` |
 | A wrong rebuild fails | Off-by-one faults, a changed flag bit and a wrong signature are caught. | `test/oracle.test.ts`, `test/pipeline.test.ts` |
@@ -112,6 +112,9 @@ Every `FAIL` from `doctor` prints its fix; more in
   looks like code, addresses or disassembly. It does not detect behaviour
   described in prose, nor payloads hidden in an arbitrary encoding such as
   base64; a reviewer still reads the spec.
+- **Several writable mounts are not swapped in as one unit.** Each mount is
+  replaced atomically; if a failure falls between two mounts, the earlier ones
+  are already updated. Every jail in this repo uses one writable mount.
 - **Local runs are not signed**, only integrity-checked. See ADR 0001.
 - Linux only.
 
