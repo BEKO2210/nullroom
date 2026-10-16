@@ -11,6 +11,7 @@
     "test": "node --experimental-strip-types --test test/*.test.ts",
     "pipeline": "node --experimental-strip-types src/cli.ts pipeline",
     "verify": "node --experimental-strip-types src/cli.ts verify",
+    "doctor": "node --experimental-strip-types src/cli.ts doctor",
     "typecheck": "tsc -p .",
     "demo": "node --experimental-strip-types scripts/demo.ts"
   },
