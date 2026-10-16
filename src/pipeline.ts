@@ -2,7 +2,7 @@
 // Rooms are scripted here: each one copies a prepared file inside its own jail,
 // so the run is deterministic and needs no agent credentials. An agent-driven
 // room would issue its commands through the same RoomRunner.
-import { copyFileSync, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, lstatSync, mkdirSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { basename, join, resolve } from "node:path";
 import { append, readChain, sha256, verifyChain } from "./audit.ts";
 import { readUntrusted, UntrustedFileError, writeAtomic } from "./fsutil.ts";
