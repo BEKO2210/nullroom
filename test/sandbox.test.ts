@@ -1,11 +1,22 @@
 import assert from "node:assert/strict";
-import { copyFileSync, existsSync, mkdtempSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
+import {
+  copyFileSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  readdirSync,
+  renameSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { before, test } from "node:test";
 import { spawnSync } from "node:child_process";
 import { append, verifyChain } from "../src/audit.ts";
-import { BwrapRunner, casePaths, jail, type Limits } from "../src/sandbox.ts";
+import { BwrapRunner, casePaths, jail, recoverWritableContents, type Limits } from "../src/sandbox.ts";
 
 const LIB = resolve("targets/smoke/out/libsmoke.so");
 const p = casePaths(mkdtempSync(join(tmpdir(), "nullroom-jail-")));
@@ -136,6 +147,68 @@ test("jail refuses a symlink export and leaves the host directory unchanged", ()
   assert.match(r.stderr, /refused writable export.*not a regular file or directory/i);
   assert.deepEqual(readdirSync(dir), ["original"]);
   assert.equal(readFileSync(join(dir, "original"), "utf8"), "unchanged\n");
+});
+
+test("jail refuses an export when stdout exceeds 16 MiB", () => {
+  const dir = mkdtempSync(join(tmpdir(), "nullroom-output-"));
+  writeFileSync(join(dir, "value"), "unchanged\n");
+  const r = jail(
+    [{ host: dir, at: "/work", rw: true }],
+    ["sh", "-c", "printf changed > /work/value; head -c 17825792 /dev/zero"],
+  );
+  assert.notEqual(r.code, 0);
+  assert.match(r.stderr, /stdout or stderr exceeded the 16 MiB limit.*export was not applied/i);
+  assert.equal(readFileSync(join(dir, "value"), "utf8"), "unchanged\n");
+});
+
+test("jail recovers an interrupted writable directory swap", () => {
+  const dir = mkdtempSync(join(tmpdir(), "nullroom-recovery-"));
+  writeFileSync(join(dir, "value"), "restored\n");
+  const old = `${dir}.next-X.old`;
+  const stale = `${dir}.next-Y`;
+  renameSync(dir, old);
+  mkdirSync(stale);
+  writeFileSync(join(stale, "value"), "stale\n");
+
+  const r = jail([{ host: dir, at: "/work", rw: true }], ["true"]);
+  assert.equal(r.code, 0, r.stderr);
+  assert.equal(readFileSync(join(dir, "value"), "utf8"), "restored\n");
+  assert.ok(!existsSync(old));
+  assert.ok(!existsSync(stale));
+});
+
+test("in-command tampering with the export file is overwritten by the trusted wrapper", () => {
+  // The export file's fd is reachable via /proc from inside the jail, but the
+  // wrapper rewrites the archive after killing every jail process, so whatever
+  // the command writes to it (here a path-traversal tar) never reaches the host.
+  const dir = mkdtempSync(join(tmpdir(), "nullroom-export-fd-"));
+  writeFileSync(join(dir, "value"), "real\n");
+  const canary = join(mkdtempSync(join(tmpdir(), "nullroom-canary-")), "outside");
+  writeFileSync(canary, "untouched\n");
+  const script = [
+    "exp=",
+    "for fd in /proc/$PPID/fd/*; do case $(readlink \"$fd\") in *.tar) exp=$fd;; esac; done",
+    "[ -n \"$exp\" ] || exit 3",
+    "mkdir -p /tmp/evil",
+    "printf pwned > /tmp/evil/escape",
+    `tar -C /tmp/evil -cf "$exp" --transform 's,^escape,${canary.replace(/^\//, "../../../../../../../../")},' escape 2>/dev/null`,
+  ].join("\n");
+  const r = jail([{ host: dir, at: "/work", rw: true }], ["sh", "-c", script]);
+  assert.equal(r.code, 0, r.stderr);
+  assert.equal(readFileSync(join(dir, "value"), "utf8"), "real\n"); // real mount content imported
+  assert.equal(readFileSync(canary, "utf8"), "untouched\n"); // no escape
+});
+
+test("jail exports 96 MiB without buffering the archive in memory", () => {
+  const dir = mkdtempSync(join(tmpdir(), "nullroom-large-export-"));
+  const r = jail(
+    [{ host: dir, at: "/work", rw: true }],
+    ["sh", "-c", "for n in 1 2 3 4; do head -c 25165824 /dev/zero > /work/file-$n || exit $?; done"],
+    { limits: { storageBytes: 128 * 1024 * 1024 } },
+  );
+  assert.equal(r.code, 0, r.stderr);
+  assert.equal(readdirSync(dir).length, 4);
+  assert.equal(readdirSync(dir).reduce((sum, name) => sum + statSync(join(dir, name)).size, 0), 96 * 1024 * 1024);
 });
 
 test("background writers do not survive the export", () => {
@@ -271,4 +344,26 @@ test("writable mount paths outside a plain absolute path are refused", () => {
   const dir = mkdtempSync(join(tmpdir(), "nullroom-badpath-"));
   for (const at of ["/work/../etc", "relative", "/work dir", "/work\nx"])
     assert.throws(() => jail([{ host: dir, at, rw: true }], ["true"]), /writable mount path not allowed/);
+});
+
+
+test("recovery keeps all backups when the host dir is missing and the choice is ambiguous", () => {
+  const parent = mkdtempSync(join(tmpdir(), "nullroom-recover-"));
+  const host = join(parent, "work");
+  // Simulate a crash with the host dir gone and two candidate backups.
+  mkdirSync(join(parent, "work.next-AAA.old"));
+  writeFileSync(join(parent, "work.next-AAA.old", "a"), "A\n");
+  mkdirSync(join(parent, "work.next-BBB.old"));
+  writeFileSync(join(parent, "work.next-BBB.old", "b"), "B\n");
+  recoverWritableContents([{ host, at: "/work", rw: true }]);
+  const left = readdirSync(parent).filter((n) => n.endsWith(".old")).sort();
+  assert.deepEqual(left, ["work.next-AAA.old", "work.next-BBB.old"]); // nothing deleted
+  assert.ok(!existsSync(host)); // ambiguous: left for the operator
+
+  // With exactly one backup it is restored and the staging dir cleared.
+  rmSync(join(parent, "work.next-BBB.old"), { recursive: true });
+  mkdirSync(join(parent, "work.next-CCC")); // stale staging dir, not a backup
+  recoverWritableContents([{ host, at: "/work", rw: true }]);
+  assert.equal(readFileSync(join(host, "a"), "utf8"), "A\n");
+  assert.deepEqual(readdirSync(parent).filter((n) => n.startsWith("work.next-")), []);
 });

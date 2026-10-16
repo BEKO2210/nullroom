@@ -76,16 +76,26 @@ flowchart TB
 | prlimit | Per process: memory, file size, CPU, open files. | `jail limits address space`, `… output file size`, `… open files` |
 | cgroup scope | Whole jail: memory and number of tasks, across all processes. | `jail memory limit holds across processes`, `jail limits the number of tasks` |
 | Timeout | Wall-clock bound; nothing survives it. | `jail timeout leaves no child process` |
-| Writable storage | Every writable mount and `/tmp` is a tmpfs of `storageBytes`. Host content is copied in at start; at the end all processes are stopped and the mounts are exported as one tar on fd 3. The host accepts only regular files and directories inside the mounts, stages them, and swaps them in with `rename`. | `jail bounds total writable storage, with a larger-limit control`, `jail refuses a symlink export and leaves the host directory unchanged` |
+| Writable storage | Every writable mount and `/tmp` is a tmpfs of `storageBytes`. Host content is copied in at start; at the end all processes are stopped and the mounts are exported as one tar on fd 3 into a private host file. The host accepts only regular files and directories inside the mounts, stages them, and swaps them in with `rename`. | `jail bounds total writable storage, with a larger-limit control`, `jail refuses a symlink export and leaves the host directory unchanged` |
 
-`jail()` refuses to run when the cgroup scope cannot be created, instead of
-running with fewer limits.
+`jail()` refuses to run when the cgroup scope cannot be created or when
+`/proc/sys/kernel/yama/ptrace_scope` is missing or below 1, instead of running
+with fewer protections.
 
-Accepted residual risk: code in the jail runs as the same user as the export
-wrapper and can reach the wrapper's fd 3 through `/proc`. Anything it writes
-there still has to pass the archive check, so it cannot place files outside
-the writable mounts; at worst it corrupts its own export. Closing this would
-need a non-dumpable wrapper or another PID namespace level.
+Export descriptor, measured behaviour: the export is written to a private host
+file whose descriptor is passed to the jail. Same-uid code in the jail can
+reopen and overwrite that file through `/proc/<wrapper>/fd/<n>` during the
+command — `ptrace_scope` does not change this, it only governs `ptrace`. This
+is harmless because the trusted wrapper regenerates the archive *after* it has
+killed every other process in the jail (`kill -9 -1`), so any in-command
+tampering is overwritten, and the host still validates the archive before it
+imports anything. Test: `in-command tampering with the export file is
+overwritten by the trusted wrapper`.
+
+Defence in depth: `jail()` also refuses to run when Yama `ptrace_scope` is
+missing or below 1, so a jailed process cannot `ptrace`-attach to the wrapper
+(its parent, a non-descendant under `ptrace_scope >= 1`) to interfere with the
+kill-then-export sequence itself.
 
 ## The wall
 

@@ -9,9 +9,22 @@
 // Room B's namespace has no mount for the target, so the binary does not exist
 // there at any path.
 import { spawnSync } from "node:child_process";
-import { cpSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, renameSync, rmSync } from "node:fs";
+import {
+  chmodSync,
+  closeSync,
+  cpSync,
+  existsSync,
+  lstatSync,
+  mkdirSync,
+  mkdtempSync,
+  openSync,
+  readFileSync,
+  readdirSync,
+  renameSync,
+  rmSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
-import { join, posix, resolve } from "node:path";
+import { basename, dirname, join, posix, resolve } from "node:path";
 import { append } from "./audit.ts";
 
 export type Room = "A" | "B";
@@ -53,11 +66,14 @@ function resolveLimits(partial: Partial<Limits> = {}): Limits {
 }
 
 const SYSTEMD_RUN = "/usr/bin/systemd-run";
+const OUTPUT_MAX_BUFFER = 16 * 1024 * 1024;
+const PTRACE_SCOPE = "/proc/sys/kernel/yama/ptrace_scope";
 // systemd-run --user reaches the user manager through XDG_RUNTIME_DIR; nothing
 // else from the host environment is passed on, and bwrap clears it anyway.
 const userManagerEnv = () => ({ XDG_RUNTIME_DIR: process.env.XDG_RUNTIME_DIR ?? `/run/user/${process.getuid?.()}` });
 
 let cgroupReady: boolean | undefined;
+let ptraceReady: boolean | undefined;
 
 /** True when a rootless cgroup v2 scope with memory and pids limits can be created. */
 export function cgroupAvailable(): boolean {
@@ -67,6 +83,17 @@ export function cgroupAvailable(): boolean {
       timeout: 10_000,
     }).status === 0;
   return cgroupReady;
+}
+
+function ptraceProtectionAvailable(): boolean {
+  if (ptraceReady !== undefined) return ptraceReady;
+  try {
+    const scope = Number(readFileSync(PTRACE_SCOPE, "utf8").trim());
+    ptraceReady = Number.isInteger(scope) && scope >= 1;
+  } catch {
+    ptraceReady = false;
+  }
+  return ptraceReady;
 }
 
 export interface RoomRunner {
@@ -190,11 +217,10 @@ function splitLines(b: Buffer): Buffer[] {
   return out;
 }
 
-function validateArchive(archive: Buffer, writable: Mount[]): string | null {
-  const maxBuffer = Math.max(1024 * 1024, archive.length * 2 + 1024);
-  const verbose = spawnSync("tar", ["-tvf", "-", "--quoting-style=literal"], { input: archive, maxBuffer });
+function validateArchive(archive: string, writable: Mount[]): string | null {
+  const verbose = spawnSync("tar", ["-tvf", archive, "--quoting-style=literal"], { maxBuffer: OUTPUT_MAX_BUFFER });
   if (verbose.status !== 0) return `archive listing failed: ${verbose.stderr.toString("utf8").trim() || `tar exited ${verbose.status}`}`;
-  const names = spawnSync("tar", ["-tf", "-", "--quoting-style=literal"], { input: archive, maxBuffer });
+  const names = spawnSync("tar", ["-tf", archive, "--quoting-style=literal"], { maxBuffer: OUTPUT_MAX_BUFFER });
   if (names.status !== 0) return `archive name listing failed: ${names.stderr.toString("utf8").trim() || `tar exited ${names.status}`}`;
 
   const detailLines = splitLines(verbose.stdout);
@@ -215,15 +241,15 @@ function validateArchive(archive: Buffer, writable: Mount[]): string | null {
   return null;
 }
 
-function replaceWritableContents(archive: Buffer, writable: Mount[]): string | null {
+function replaceWritableContents(archive: string, writable: Mount[]): string | null {
   if (!writable.length) return null;
   const temp = mkdtempSync(join(tmpdir(), "nullroom-export-"));
   const staged: { host: string; next: string }[] = [];
   try {
     const extracted = spawnSync(
       "tar",
-      ["-x", "--no-same-owner", "--no-same-permissions", "--delay-directory-restore", "-C", temp, "-f", "-"],
-      { input: archive, maxBuffer: Math.max(1024 * 1024, archive.length * 2 + 1024) },
+      ["-x", "--no-same-owner", "--no-same-permissions", "--delay-directory-restore", "-C", temp, "-f", archive],
+      { maxBuffer: OUTPUT_MAX_BUFFER },
     );
     if (extracted.status !== 0)
       return `archive extraction failed: ${extracted.stderr.toString("utf8").trim() || `tar exited ${extracted.status}`}`;
@@ -256,15 +282,42 @@ function replaceWritableContents(archive: Buffer, writable: Mount[]): string | n
   }
 }
 
+export function recoverWritableContents(writable: Mount[]): void {
+  for (const { host } of writable) {
+    const parent = dirname(host);
+    const prefix = `${basename(host)}.next-`;
+    const leftovers = readdirSync(parent)
+      .filter((name) => name.startsWith(prefix))
+      .map((name) => join(parent, name))
+      .filter((path) => {
+        const st = lstatSync(path);
+        return st.isDirectory() && !st.isSymbolicLink();
+      });
+    const old = leftovers.filter((path) => path.endsWith(".old"));
+    // If the host dir is gone, a crash happened between the two renames. Restore
+    // a backup before removing anything. With more than one backup the right one
+    // is ambiguous, so keep them all and leave recovery to the operator.
+    if (!existsSync(host)) {
+      if (old.length === 1) renameSync(old[0]!, host);
+      else continue; // ambiguous or none: do not delete the only copies of the data
+    }
+    // Host dir exists (or was just restored): leftovers are stale staging dirs.
+    for (const path of leftovers) if (path !== host && existsSync(path)) rmSync(path, { recursive: true, force: true });
+  }
+}
+
 /**
  * One command in a fresh namespace with exactly these mounts, inside its own
- * cgroup scope. Fails closed: without cgroup delegation nothing runs.
+ * cgroup scope. Fails closed when a required host protection is unavailable.
  */
 export function jail(mounts: Mount[], argv: string[], opts: RunOpts = {}): RunResult {
   const limits = resolveLimits(opts.limits);
   const writable = [...mounts, ...(opts.extraRo ?? [])].filter((m) => m.rw);
   if (!cgroupAvailable())
     throw new Error("cgroup v2 limits unavailable: needs a systemd user manager with memory and pids delegation");
+  if (!ptraceProtectionAvailable())
+    throw new Error("ptrace protection unavailable: needs /proc/sys/kernel/yama/ptrace_scope >= 1");
+  recoverWritableContents(writable);
   const scope = [
     "--user", "--scope", "--quiet", "--collect",
     "-p", `MemoryMax=${limits.memoryBytes}`,
@@ -272,23 +325,44 @@ export function jail(mounts: Mount[], argv: string[], opts: RunOpts = {}): RunRe
     "-p", `TasksMax=${limits.tasks}`,
     "-p", "CPUQuota=100%",
   ];
-  const maxBuffer = limits.storageBytes * Math.max(1, writable.length) + 16 * 1024 * 1024;
-  const r = spawnSync(SYSTEMD_RUN, [...scope, "/usr/bin/bwrap", ...bwrapArgs(mounts, argv, opts)], {
-    stdio: ["ignore", "pipe", "pipe", "pipe"],
-    timeout: (opts.timeoutMs ?? 120_000) + 30_000,
-    maxBuffer,
-    env: userManagerEnv(),
-  });
-  const code = r.status ?? -1;
-  const stdout = r.stdout?.toString("utf8") ?? "";
-  let stderr = r.stderr?.toString("utf8") ?? "";
-  const archive = r.output[3] as Buffer | null;
-  const refusal = archive ? validateArchive(archive, writable) ?? replaceWritableContents(archive, writable) : "jail produced no export archive";
-  if (refusal) {
-    stderr += `${stderr && !stderr.endsWith("\n") ? "\n" : ""}refused writable export (original jail exit ${code}): ${refusal}\n`;
-    return { code: code === 0 ? 1 : code, stdout, stderr };
+  const exportDir = mkdtempSync(join(tmpdir(), "nullroom-export-"));
+  const archive = join(exportDir, "writable.tar");
+  let exportFd: number | undefined;
+  try {
+    chmodSync(exportDir, 0o700);
+    exportFd = openSync(archive, "w", 0o600);
+    const r = spawnSync(SYSTEMD_RUN, [...scope, "/usr/bin/bwrap", ...bwrapArgs(mounts, argv, opts)], {
+      stdio: ["ignore", "pipe", "pipe", exportFd],
+      timeout: (opts.timeoutMs ?? 120_000) + 30_000,
+      maxBuffer: OUTPUT_MAX_BUFFER,
+      env: userManagerEnv(),
+    });
+    const code = r.status ?? -1;
+    const stdout = r.stdout?.toString("utf8") ?? "";
+    let stderr = r.stderr?.toString("utf8") ?? "";
+    if (r.error) {
+      const detail = (r.error as NodeJS.ErrnoException).code === "ENOBUFS"
+        ? `jail stdout or stderr exceeded the ${OUTPUT_MAX_BUFFER / (1024 * 1024)} MiB limit`
+        : `jail process failed: ${r.error.message}`;
+      stderr += `${stderr && !stderr.endsWith("\n") ? "\n" : ""}${detail}; writable export was not applied\n`;
+      return { code: code === 0 ? 1 : code, stdout, stderr };
+    }
+    closeSync(exportFd);
+    exportFd = undefined;
+    const refusal = validateArchive(archive, writable) ?? replaceWritableContents(archive, writable);
+    if (refusal) {
+      stderr += `${stderr && !stderr.endsWith("\n") ? "\n" : ""}refused writable export (original jail exit ${code}): ${refusal}\n`;
+      return { code: code === 0 ? 1 : code, stdout, stderr };
+    }
+    return { code, stdout, stderr };
+  } finally {
+    if (exportFd !== undefined) {
+      try {
+        closeSync(exportFd);
+      } catch {}
+    }
+    rmSync(exportDir, { recursive: true, force: true });
   }
-  return { code, stdout, stderr };
 }
 
 export class BwrapRunner implements RoomRunner {
