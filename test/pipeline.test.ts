@@ -100,3 +100,14 @@ test("pipeline reuses its own case directory and an empty one", () => {
   const empty = mkdtempSync(join(tmp, "empty-"));
   assert.equal(runPipeline({ ...base, caseDir: empty, scripted: resolve("scripted/smoke") }).passed, true);
 });
+
+test("a directory with a stray audit_chain.json is not treated as a case (regression)", () => {
+  const dir = mkdtempSync(join(tmp, "stray-chain-"));
+  writeFileSync(join(dir, "audit_chain.json"), "[]\n");
+  writeFileSync(join(dir, "notes.txt"), "keep me\n");
+  assert.throws(
+    () => runPipeline({ ...base, caseDir: dir, scripted: resolve("scripted/smoke") }),
+    /not a nullroom case directory/,
+  );
+  assert.equal(readFileSync(join(dir, "notes.txt"), "utf8"), "keep me\n");
+});
