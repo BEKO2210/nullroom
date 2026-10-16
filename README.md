@@ -57,6 +57,7 @@ PASSED
 
 Details: [Architecture](docs/ARCHITECTURE.md) ·
 [External testing](docs/EXTERNAL-TESTING.md) ·
+[Security policy](SECURITY.md) ·
 [Scorecard](docs/SCORECARD.md) ·
 [Engineering report](docs/ENGINEERING-REPORT.md) ·
 [ADR 0001: provenance](docs/adr/0001-audit-provenance.md)

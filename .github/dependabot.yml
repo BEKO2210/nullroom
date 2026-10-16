@@ -1,0 +1,20 @@
+version: 2
+updates:
+  # Dev dependencies (typescript, @types/node). No runtime dependencies exist.
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: deps
+
+  # Keep the SHA-pinned GitHub Actions current (Dependabot updates the pin and
+  # the version comment together).
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: ci

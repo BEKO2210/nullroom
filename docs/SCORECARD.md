@@ -36,13 +36,23 @@ GITHUB_AUTH_TOKEN=$(gh auth token) scorecard --repo=github.com/BEKO2210/nullroom
 
 These are listed because they would improve the project, not the number:
 
-- **Security-Policy**: a `SECURITY.md` plus GitHub private vulnerability
-  reporting gives external testers a private channel for security findings.
-- **Dependency-Update-Tool**: Dependabot for the two dev dependencies and the
-  pinned actions keeps SHAs current without hand edits.
-- **SAST**: CodeQL for JavaScript/TypeScript on pull requests.
-- **Signed-Releases**: attaching the Sigstore bundle files to the release would
-  make the existing provenance visible to tools that only read release assets.
+- **Security-Policy**: `SECURITY.md` and GitHub Private Vulnerability
+  Reporting are now in place (both added after the 4.5 run above). A later
+  Scorecard run should score this check and SAST/Dependency-Update-Tool higher;
+  the 4.5 figure is kept as the measurement taken on the release commit.
+- **Dependency-Update-Tool**: Dependabot for npm and GitHub Actions is now
+  configured (`.github/dependabot.yml`).
+- **SAST**: CodeQL for JavaScript/TypeScript now runs on push, pull request
+  and weekly (`.github/workflows/codeql.yml`).
+- **Signed-Releases**: investigated and deliberately not changed for the score.
+  The release files already carry Sigstore provenance and the archive an SBOM
+  attestation; both verify with `gh attestation verify` against GitHub's
+  attestation store and against a tampered copy (checked at release time).
+  Attaching the `.sigstore` bundle files to the release would let a verifier
+  work fully offline and would make Scorecard count the check — a small real
+  benefit (offline verification) next to a score benefit. It is recorded here
+  as an option; it is not implemented solely to raise the number, per the
+  project's rule against that.
 
 **Code-Review**, **Contributors** and **Maintained** change only with real
 outside reviewers, contributors and time.
