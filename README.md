@@ -56,6 +56,8 @@ PASSED
 | A wrong rebuild fails | Off-by-one faults, a changed flag bit and a wrong signature are caught. | `test/oracle.test.ts`, `test/pipeline.test.ts` |
 
 Details: [Architecture](docs/ARCHITECTURE.md) ·
+[External testing](docs/EXTERNAL-TESTING.md) ·
+[Scorecard](docs/SCORECARD.md) ·
 [Engineering report](docs/ENGINEERING-REPORT.md) ·
 [ADR 0001: provenance](docs/adr/0001-audit-provenance.md)
 
