@@ -75,14 +75,33 @@ const userManagerEnv = () => ({ XDG_RUNTIME_DIR: process.env.XDG_RUNTIME_DIR ?? 
 let cgroupReady: boolean | undefined;
 let ptraceReady: boolean | undefined;
 
-/** True when a rootless cgroup v2 scope with memory and pids limits can be created. */
+/** systemd-run arguments for a jail scope; the probe below uses the same properties. */
+function scopeArgs(memoryBytes: number, tasks: number): string[] {
+  return [
+    "--user", "--scope", "--quiet", "--collect",
+    "-p", `MemoryMax=${memoryBytes}`,
+    "-p", "MemorySwapMax=0",
+    "-p", `TasksMax=${tasks}`,
+    "-p", "CPUQuota=100%",
+  ];
+}
+
+/** True when a rootless cgroup v2 scope with every property jail() sets can be created. */
 export function cgroupAvailable(): boolean {
   cgroupReady ??=
-    spawnSync(SYSTEMD_RUN, ["--user", "--scope", "--quiet", "-p", "TasksMax=4", "-p", "MemoryMax=16M", "/usr/bin/true"], {
+    spawnSync(SYSTEMD_RUN, [...scopeArgs(16 << 20, 4), "/usr/bin/true"], {
       env: userManagerEnv(),
       timeout: 10_000,
     }).status === 0;
   return cgroupReady;
+}
+
+/** Throws the same errors jail() would, without running anything. */
+export function assertJailPrerequisites(): void {
+  if (!cgroupAvailable())
+    throw new Error("cgroup v2 limits unavailable: needs a systemd user manager with memory and pids delegation");
+  if (!ptraceProtectionAvailable())
+    throw new Error("ptrace protection unavailable: needs /proc/sys/kernel/yama/ptrace_scope >= 1");
 }
 
 /** True when Yama prevents same-uid processes from attaching to arbitrary peers. */
@@ -314,18 +333,9 @@ export function recoverWritableContents(writable: Mount[]): void {
 export function jail(mounts: Mount[], argv: string[], opts: RunOpts = {}): RunResult {
   const limits = resolveLimits(opts.limits);
   const writable = [...mounts, ...(opts.extraRo ?? [])].filter((m) => m.rw);
-  if (!cgroupAvailable())
-    throw new Error("cgroup v2 limits unavailable: needs a systemd user manager with memory and pids delegation");
-  if (!ptraceProtectionAvailable())
-    throw new Error("ptrace protection unavailable: needs /proc/sys/kernel/yama/ptrace_scope >= 1");
+  assertJailPrerequisites();
   recoverWritableContents(writable);
-  const scope = [
-    "--user", "--scope", "--quiet", "--collect",
-    "-p", `MemoryMax=${limits.memoryBytes}`,
-    "-p", "MemorySwapMax=0",
-    "-p", `TasksMax=${limits.tasks}`,
-    "-p", "CPUQuota=100%",
-  ];
+  const scope = scopeArgs(limits.memoryBytes, limits.tasks);
   const exportDir = mkdtempSync(join(tmpdir(), "nullroom-export-"));
   const archive = join(exportDir, "writable.tar");
   let exportFd: number | undefined;
