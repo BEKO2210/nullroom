@@ -209,7 +209,10 @@ export function bwrapArgs(mounts: Mount[], argv: string[], opts: RunOpts = {}): 
     "  paths=\"$paths${dest#/}\n\"",
     "  i=$((i + 1))",
     "done",
-    "if [ \"$seed_status\" -eq 0 ]; then \"$@\" 3>&-; command_status=$?; else command_status=$seed_status; fi",
+    // If seeding failed (e.g. the tmpfs filled), do not export a partial copy:
+    // write nothing to fd 3 so the host refuses and leaves the host dirs intact.
+    "if [ \"$seed_status\" -ne 0 ]; then kill -9 -1 2>/dev/null || true; exit \"$seed_status\"; fi",
+    "\"$@\" 3>&-; command_status=$?",
     "kill -9 -1 2>/dev/null || true",
     "rm -f /tmp/.nullroom-export; printf '%s' \"$paths\" > /tmp/.nullroom-export",
     "tar -C / -cf - --files-from=/tmp/.nullroom-export >&3",
