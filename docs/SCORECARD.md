@@ -1,9 +1,17 @@
 # OpenSSF Scorecard
 
-Run on 2026-10-16 against `main` at `041e9b8` (the `v0.1.0-rc.1` commit) with
-Scorecard v5.6.0 (release binary, checksum verified). Aggregate score:
-**4.5 / 10**. The numbers are recorded as measured; nothing was changed in the
-repository to raise them.
+Two runs with Scorecard v5.6.0 (release binary, checksum verified), recorded
+as measured.
+
+| Run | Commit | Aggregate |
+| --- | --- | --- |
+| At release | `041e9b8` (`v0.1.0-rc.1`) | **4.5 / 10** |
+| After hardening | `3af6b7f` | **6.2 / 10** |
+
+The rise came from real changes, not score tuning: `SECURITY.md` and private
+reporting (Security-Policy 0 → 10), `.github/dependabot.yml`
+(Dependency-Update-Tool 0 → 10), and CodeQL (SAST 0 → 7). The table below is
+the release run; the three checks are annotated with their new value.
 
 Reproduce:
 
@@ -20,12 +28,12 @@ GITHUB_AUTH_TOKEN=$(gh auth token) scorecard --repo=github.com/BEKO2210/nullroom
 | 10 | Pinned-Dependencies | Actions pinned to commit SHAs, npm dependencies pinned exactly. |
 | 10 | Token-Permissions | Workflow tokens are read-only by default; write scopes only where needed. |
 | 10 | Vulnerabilities | No known vulnerabilities. |
-| 4 | Branch-Protection | PRs, status check, up-to-date branches, no force-push or deletion, rules apply to admins. Missing: required approvers, CODEOWNERS review, last-push approval. With a single maintainer a required approval would block every merge, so this stays as it is. |
+| 4 | Branch-Protection | PRs, **two required status checks (`test`, `analyze`), linear history**, up-to-date branches, no force-push or deletion, rules apply to admins. Still 4/10: the remaining tiers need required human approvers, CODEOWNERS and last-push approval, which a single maintainer cannot provide. The extra required check and linear history were added anyway because they are real, even though this Scorecard check does not score them. |
 | 0 | Signed-Releases | **Measurement gap, not missing signing.** All release files carry Sigstore provenance and the archive an SBOM attestation, verifiable with `gh attestation verify` (see [RELEASING.md](RELEASING.md)). Scorecard looks for signature or provenance *files* attached to the release; the attestations live in GitHub's attestation store instead. |
 | 0 | Code-Review | 0 of 15 changesets approved by a second human. Reviews were done by AI agents and recorded in PR descriptions, which Scorecard does not count, correctly: there is no second human reviewer. |
-| 0 | Security-Policy | No `SECURITY.md` and no private vulnerability reporting channel yet. A real gap for external testers. |
-| 0 | SAST | No static analysis tool runs on commits. |
-| 0 | Dependency-Update-Tool | No Dependabot or Renovate. |
+| 0 → 10 | Security-Policy | `SECURITY.md` and GitHub Private Vulnerability Reporting now in place. |
+| 0 → 7 | SAST | CodeQL (javascript-typescript) runs on push, PR and weekly. 7 not 10 until it has run on enough history. |
+| 0 → 10 | Dependency-Update-Tool | Dependabot for npm and GitHub Actions. |
 | 0 | Fuzzing | Not fuzzed. |
 | 0 | CII-Best-Practices | No OpenSSF Best Practices badge. |
 | 0 | Maintained | Repository is younger than 90 days. |
