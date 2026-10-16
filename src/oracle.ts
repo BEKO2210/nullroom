@@ -94,7 +94,10 @@ function outputCheck(i: OracleInput): OutputCheck {
   const exe = join(outDir, "check");
   const parse = (r: RunResult, which: string) => {
     if (r.code !== 0) throw new Error(`driver exited ${r.code} against ${which}`);
-    return JSON.parse(r.stdout) as Record<string, unknown>;
+    const parsed: unknown = JSON.parse(r.stdout);
+    if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed))
+      throw new Error(`driver output against ${which} is not a JSON object`);
+    return parsed as Record<string, unknown>;
   };
   let original: Record<string, unknown>, rebuilt: Record<string, unknown>;
   try {
