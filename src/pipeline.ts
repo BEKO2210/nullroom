@@ -2,7 +2,7 @@
 // Rooms are scripted here: each one copies a prepared file inside its own jail,
 // so the run is deterministic and needs no agent credentials. An agent-driven
 // room would issue its commands through the same RoomRunner.
-import { copyFileSync, existsSync, lstatSync, readdirSync, readFileSync, rmSync } from "node:fs";
+import { copyFileSync, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { basename, join, resolve } from "node:path";
 import { append, readChain, sha256, verifyChain } from "./audit.ts";
 import { readUntrusted, UntrustedFileError, writeAtomic } from "./fsutil.ts";
@@ -66,28 +66,39 @@ export function functionStatus(fns: string[], oracle: OracleReport | null): Reco
   return out;
 }
 
+// The only entries runPipeline ever creates under a case root.
+const CASE_ENTRIES = new Set(["target", "a", "inbox", "b", "oracle", "audit_chain.json", "report.json"]);
+
 export function runPipeline(i: PipelineInput): Report {
   const p = casePaths(i.caseDir);
-  // Fail on missing prerequisites before touching an existing case directory.
+  // Validate every input before touching anything on disk: a bad run must never
+  // destroy a previous case. Read the target once and reuse those bytes.
+  const targetBytes = readUntrusted(i.targetLib, 512 * 1024 * 1024);
+  for (const f of ["SPEC.md", "reconstructed.c"]) {
+    if (!existsSync(resolve(i.scripted, f))) throw new Error(`scripted input missing: ${resolve(i.scripted, f)}`);
+  }
   assertJailPrerequisites();
-  // The case dir is replaced on every run. Only do that to a directory that is
-  // missing, empty, or one this tool created (it has an audit chain); never to
-  // an arbitrary path given with --case.
+  // The case dir is replaced on every run. Replace only a directory that is
+  // missing, empty, or one this tool owns. Ownership means: a chain that
+  // verifies AND no entry outside the layout this tool creates — a hash chain
+  // proves integrity, not ownership, so a forged genesis chain is not enough.
   if (existsSync(p.root)) {
     const st = lstatSync(p.root);
-    // Owned means: empty, or holds a chain that verifies and starts with genesis.
-    // A file that merely has the right name is not enough.
-    const ours =
-      st.isDirectory() &&
-      !st.isSymbolicLink() &&
-      (readdirSync(p.root).length === 0 || (existsSync(p.chain) && verifyChain(p.chain).ok));
-    if (!ours) throw new Error(`refusing to replace ${p.root}: not empty and not a nullroom case directory`);
+    const entries = st.isDirectory() && !st.isSymbolicLink() ? readdirSync(p.root) : null;
+    const owned =
+      entries !== null &&
+      (entries.length === 0 ||
+        (existsSync(p.chain) && verifyChain(p.chain).ok && entries.every((e) => CASE_ENTRIES.has(e))));
+    if (!owned)
+      throw new Error(`refusing to replace ${p.root}: not empty and not a nullroom case directory (it holds files this tool did not create)`);
+    // Delete only the known layout, never unknown siblings.
+    for (const e of entries) rmSync(join(p.root, e), { recursive: true, force: true });
   }
-  rmSync(p.root, { recursive: true, force: true });
   const runner = new BwrapRunner(p);
   const lib = basename(i.targetLib);
-  const targetHash = sha256(readFileSync(i.targetLib));
-  copyFileSync(i.targetLib, join(p.target, lib));
+  const targetHash = sha256(targetBytes);
+  mkdirSync(p.target, { recursive: true });
+  writeFileSync(join(p.target, lib), targetBytes);
   append(p.chain, "genesis", { target: lib, sha256: targetHash, mode: "scripted" });
 
   // Room A: sees /target, writes /outbox.

@@ -111,3 +111,22 @@ test("a directory with a stray audit_chain.json is not treated as a case (regres
   );
   assert.equal(readFileSync(join(dir, "notes.txt"), "utf8"), "keep me\n");
 });
+
+test("a forged genesis chain plus unknown files does not authorize deletion (regression)", () => {
+  const dir = mkdtempSync(join(tmp, "forged-"));
+  writeFileSync(join(dir, "precious.txt"), "years of work\n");
+  append(join(dir, "audit_chain.json"), "genesis", {}); // valid, verifying chain
+  assert.throws(
+    () => runPipeline({ ...base, caseDir: dir, scripted: resolve("scripted/smoke") }),
+    /it holds files this tool did not create/,
+  );
+  assert.equal(readFileSync(join(dir, "precious.txt"), "utf8"), "years of work\n");
+});
+
+test("a missing target leaves a previous case intact (regression)", () => {
+  const dir = join(tmp, "keep-on-bad-input");
+  assert.equal(runPipeline({ ...base, caseDir: dir, scripted: resolve("scripted/smoke") }).passed, true);
+  const before = readFileSync(join(dir, "report.json"), "utf8");
+  assert.throws(() => runPipeline({ ...base, targetLib: "/no/such/lib.so", caseDir: dir, scripted: resolve("scripted/smoke") }));
+  assert.equal(readFileSync(join(dir, "report.json"), "utf8"), before); // old result untouched
+});
