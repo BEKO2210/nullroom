@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { copyFileSync, existsSync, mkdtempSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { copyFileSync, existsSync, mkdtempSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { before, test } from "node:test";
@@ -80,6 +80,79 @@ test("jail limits output file size", () => {
   assert.equal(statSync(file).size, 1024 * 1024);
 });
 
+test("jail bounds total writable storage, with a larger-limit control", () => {
+  const fill = [
+    "sh", "-c",
+    "i=0; while [ $i -lt 100 ]; do head -c 1024 /dev/zero > /work/file-$i || exit $?; i=$((i + 1)); done",
+  ];
+  const cappedDir = mkdtempSync(join(tmpdir(), "nullroom-storage-capped-"));
+  const capped = jail([{ host: cappedDir, at: "/work", rw: true }], fill, {
+    limits: { storageBytes: 64 * 1024 },
+  });
+  assert.notEqual(capped.code, 0);
+  assert.match(capped.stderr, /No space left on device/);
+  const bytes = readdirSync(cappedDir).reduce((sum, name) => sum + statSync(join(cappedDir, name)).size, 0);
+  assert.ok(bytes <= 64 * 1024, `exported ${bytes} bytes`);
+
+  const roomyDir = mkdtempSync(join(tmpdir(), "nullroom-storage-roomy-"));
+  const roomy = jail([{ host: roomyDir, at: "/work", rw: true }], fill, {
+    limits: { storageBytes: 1024 * 1024 },
+  });
+  assert.equal(roomy.code, 0, roomy.stderr);
+  assert.equal(readdirSync(roomyDir).length, 100);
+});
+
+test("jail bounds private tmp storage", () => {
+  const r = jail([], ["dd", "if=/dev/zero", "of=/tmp/large", "bs=4096", "count=64"], {
+    limits: { storageBytes: 64 * 1024, fileBytes: 1024 * 1024 },
+  });
+  assert.notEqual(r.code, 0);
+  assert.match(r.stderr, /No space left on device/);
+});
+
+test("writable mounts are seeded and replace host contents after the run", () => {
+  const dir = mkdtempSync(join(tmpdir(), "nullroom-seed-"));
+  writeFileSync(join(dir, "modify"), "before\n");
+  writeFileSync(join(dir, "remove"), "delete me\n");
+  const r = jail(
+    [{ host: dir, at: "/work", rw: true }],
+    ["sh", "-c", "test \"$(cat /work/modify)\" = before && printf 'after\\n' > /work/modify && rm /work/remove && touch /work/added"],
+  );
+  assert.equal(r.code, 0, r.stderr);
+  assert.equal(readFileSync(join(dir, "modify"), "utf8"), "after\n");
+  assert.ok(!existsSync(join(dir, "remove")));
+  assert.ok(existsSync(join(dir, "added")));
+});
+
+test("jail refuses a symlink export and leaves the host directory unchanged", () => {
+  const dir = mkdtempSync(join(tmpdir(), "nullroom-symlink-"));
+  writeFileSync(join(dir, "original"), "unchanged\n");
+  const r = jail([{ host: dir, at: "/work", rw: true }], ["ln", "-s", "/etc/passwd", "/work/link"]);
+  assert.notEqual(r.code, 0);
+  assert.match(r.stderr, /refused writable export.*not a regular file or directory/i);
+  assert.deepEqual(readdirSync(dir), ["original"]);
+  assert.equal(readFileSync(join(dir, "original"), "utf8"), "unchanged\n");
+});
+
+test("jail freezes background writers before exporting", () => {
+  const dir = mkdtempSync(join(tmpdir(), "nullroom-background-"));
+  writeFileSync(join(dir, "value"), "seed\n");
+  const marker = `nullroom-background-${process.pid}-${Date.now()}`;
+  const script = "printf first > /work/next && mv /work/next /work/value; touch /work/ready; while :; do printf first > /work/next && mv /work/next /work/value; printf second > /work/next && mv /work/next /work/value; done";
+  const r = jail(
+    [{ host: dir, at: "/work", rw: true }],
+    ["sh", "-c", "sh -c \"$1\" \"$2\" & while [ ! -e /work/ready ]; do :; done", "launcher", script, marker],
+  );
+  assert.equal(r.code, 0, r.stderr);
+  assert.match(readFileSync(join(dir, "value"), "utf8"), /^(?:first|second)$/);
+  let remaining = spawnSync("pgrep", ["-f", "--", marker], { encoding: "utf8" });
+  for (let i = 0; i < 20 && remaining.status === 0; i++) {
+    spawnSync("sleep", ["0.1"]);
+    remaining = spawnSync("pgrep", ["-f", "--", marker], { encoding: "utf8" });
+  }
+  assert.equal(remaining.status, 1, `process remained after export: ${remaining.stdout}`);
+});
+
 test("jail limits address space", () => {
   const dir = mkdtempSync(join(tmpdir(), "nullroom-memory-"));
   const source = join(dir, "memory.c");
@@ -141,6 +214,7 @@ test("jail rejects invalid limits", () => {
   const invalid: [keyof Limits, number][] = [
     ["memoryBytes", 0],
     ["fileBytes", -1],
+    ["storageBytes", 0],
     ["cpuSeconds", 1.5],
     ["openFiles", Number.NaN],
   ];
