@@ -109,23 +109,25 @@ some images), CI shows the sysctl it sets.
 
 ## How this project was built
 
-I started Nullroom and set its direction: what it should prove, which
-security properties matter, which trade-offs to accept, and when a change was
-good enough to merge. The code was written with AI coding agents under that
-direction, and that is documented rather than hidden:
+I started Nullroom, defined what it should prove, and set the priorities and
+limits of the project. I approved each work package and each merge in
+conversation with the agents. I did not write the code, and I did not review
+the diffs line by line; the checks below were done by the agents and by CI.
 
 | Role | Who |
 | --- | --- |
-| Project initiator, requirements, decisions, final approval | Belkis Aslani |
-| Architecture, task breakdown, most of the code, integration, verification | Claude Code (Anthropic) |
-| Implementation of scoped work packages in isolated git worktrees | Codex CLI (OpenAI) |
-| Independent read-only code review | Cursor CLI (Grok model) |
+| Idea, goals, priorities, scope decisions, approval of work packages and merges | Belkis Aslani |
+| First prototype (an in-memory demo with its own bytecode, since replaced) | Grok |
+| Architecture, task breakdown, most of the code, integration, running the gates on the host | Claude Code (Anthropic) |
+| Implementation of two scoped work packages in isolated git worktrees | Codex CLI (OpenAI) |
+| Independent read-only code review of those packages | Cursor CLI (model `cursor-grok-4.5-high`) |
+| Required check on every pull request: typecheck, audit, tests, pipeline | GitHub Actions |
 
 Each pull request states which agent did what and what was checked
-independently; see [PR #1](https://github.com/BEKO2210/nullroom/pull/1) for
-an example where the reviewer found a real defect (per-process limits
-multiplying with `fork`) that was fixed before merge. All changes go through
-pull requests with a required passing CI check.
+independently. In [PR #1](https://github.com/BEKO2210/nullroom/pull/1) the
+reviewer found a real defect (per-process limits multiplying with `fork`) that
+was fixed before merge. The [engineering report](docs/ENGINEERING-REPORT.md)
+lists every change, its reviewer and the defects found.
 
 ## License
 
