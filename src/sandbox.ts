@@ -85,7 +85,8 @@ export function cgroupAvailable(): boolean {
   return cgroupReady;
 }
 
-function ptraceProtectionAvailable(): boolean {
+/** True when Yama prevents same-uid processes from attaching to arbitrary peers. */
+export function ptraceProtectionAvailable(): boolean {
   if (ptraceReady !== undefined) return ptraceReady;
   try {
     const scope = Number(readFileSync(PTRACE_SCOPE, "utf8").trim());
