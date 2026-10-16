@@ -1,6 +1,6 @@
 import { spawnSync } from "node:child_process";
 import { accessSync, constants } from "node:fs";
-import { cgroupAvailable, ptraceProtectionAvailable } from "./sandbox.ts";
+import { bwrapArgs, cgroupAvailable, ptraceProtectionAvailable } from "./sandbox.ts";
 
 export type DoctorCheck = {
   name: string;
@@ -22,17 +22,14 @@ function nodeVersionAvailable(): boolean {
   return major > 22 || (major === 22 && minor >= 6);
 }
 
+// The jail's PATH; tools must be found there, not on the caller's PATH.
+const JAIL_PATH = ["/usr/local/bin", "/usr/bin", "/bin"];
+const onJailPath = (tool: string) => JAIL_PATH.some((dir) => executable(`${dir}/${tool}`));
+
+/** Same namespaces, mounts and wrapper as jail(), without the cgroup scope. */
 function bwrapNamespaceAvailable(): boolean {
   if (!executable("/usr/bin/bwrap")) return false;
-  return spawnSync(
-    "/usr/bin/bwrap",
-    ["--unshare-user", "--unshare-pid", "--die-with-parent", "--new-session", "--ro-bind", "/", "/", "--", "/usr/bin/true"],
-    { stdio: "ignore", timeout: 10_000 },
-  ).status === 0;
-}
-
-function gccAvailable(): boolean {
-  return spawnSync("gcc", ["--version"], { stdio: "ignore", timeout: 10_000 }).status === 0;
+  return spawnSync("/usr/bin/bwrap", bwrapArgs([], ["/usr/bin/true"]), { stdio: "ignore", timeout: 10_000, env: {} }).status === 0;
 }
 
 /** Run the host prerequisite probes used by the CLI and sandbox. */
@@ -54,9 +51,14 @@ export function doctorChecks(): DoctorCheck[] {
       fix: "install bubblewrap and enable unprivileged user namespaces",
     },
     {
-      name: "gcc",
-      ok: gccAvailable(),
-      fix: "install gcc (on Ubuntu: sudo apt install gcc)",
+      name: "gcc on the jail PATH (/usr/local/bin, /usr/bin, /bin)",
+      ok: onJailPath("gcc"),
+      fix: "install gcc system-wide (on Ubuntu: sudo apt install gcc); a gcc only on your own PATH is not visible in the jail",
+    },
+    {
+      name: "tar and timeout on the jail PATH",
+      ok: onJailPath("tar") && onJailPath("timeout"),
+      fix: "install tar and coreutils",
     },
     {
       name: "systemd-run --user --scope with MemoryMax/TasksMax",
@@ -76,10 +78,16 @@ export function doctorChecks(): DoctorCheck[] {
   ];
 }
 
-export function runDoctor(): boolean {
-  const checks = doctorChecks();
-  for (const check of checks) {
-    console.log(check.ok ? `ok    ${check.name}` : `FAIL  ${check.name} — fix: ${check.fix}`);
-  }
+export function formatCheck(check: DoctorCheck): string {
+  return check.ok ? `ok    ${check.name}` : `FAIL  ${check.name} — fix: ${check.fix}`;
+}
+
+export function runDoctor(checks: DoctorCheck[] = doctorChecks()): boolean {
+  for (const check of checks) console.log(formatCheck(check));
   return checks.every((check) => check.ok);
+}
+
+/** True for the fail-closed prerequisite errors thrown by sandbox.ts, and only those. */
+export function isPrerequisiteError(message: string): boolean {
+  return /^(cgroup v2 limits unavailable|ptrace protection unavailable):/.test(message);
 }
