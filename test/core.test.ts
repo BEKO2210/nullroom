@@ -151,3 +151,20 @@ test("audit: a symlink in the inbox is rejected even if its target matches", () 
   append(chain, "crossing", { file: "SPEC.md", sha256: sha256(SPEC) });
   assert.match(verifyChain(chain, inbox).problems.join(), /inbox\/SPEC.md: not a regular file/);
 });
+
+test("audit: removing the whole inbox directory is detected (regression)", () => {
+  const { chain, inbox } = tmpCase();
+  append(chain, "genesis", {});
+  writeFileSync(join(inbox, "SPEC.md"), SPEC);
+  append(chain, "crossing", { file: "SPEC.md", sha256: sha256(SPEC) });
+  rmSync(inbox, { recursive: true });
+  assert.match(verifyChain(chain, inbox).problems.join(), /inbox\/SPEC.md: crossed but missing/);
+});
+
+test("abi: duplicate names and C keywords are rejected (regression)", () => {
+  assert.throws(() => parseAbi("fn f(i32 x, i32 x) -> i32"), /duplicate parameter name/);
+  assert.throws(() => parseAbi("fn f(i32 for) -> i32"), /C keyword/);
+  assert.throws(() => parseAbi("fn return(i32 x) -> i32"), /C keyword/);
+  assert.throws(() => parseAbi("fn f(i32 x) -> i32\nfn f(i32 y) -> i32"), /duplicate function/);
+  assert.throws(() => parseAbi("handle r\nhandle r\nfn g(r x) -> i32"), /duplicate handle/);
+});
