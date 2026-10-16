@@ -41,6 +41,8 @@ jobs:
           XDG_RUNTIME_DIR=/run/user/$uid systemd-run --user --scope --quiet -p TasksMax=4 -p MemoryMax=16M true
 
       - run: npm ci
+      - name: Doctor (host prerequisites)
+        run: npm run doctor
       - name: Typecheck
         run: npx tsc -p .
       - name: Dependency audit
