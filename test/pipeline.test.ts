@@ -1,11 +1,11 @@
 import assert from "node:assert/strict";
-import { copyFileSync, existsSync, mkdtempSync, readdirSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
+import { copyFileSync, existsSync, mkdtempSync, readdirSync, readFileSync, symlinkSync, writeFileSync, mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
 import { before, test } from "node:test";
-import { readChain, verifyChain } from "../src/audit.ts";
-import { runPipeline } from "../src/pipeline.ts";
+import { append, readChain, verifyChain } from "../src/audit.ts";
+import { crossWall, runPipeline } from "../src/pipeline.ts";
 import { casePaths } from "../src/sandbox.ts";
 
 const LIB = resolve("targets/smoke/out/libsmoke.so");
@@ -63,4 +63,20 @@ test("tampering with the inbox after the run is detected", () => {
   const p = casePaths(r.case);
   writeFileSync(join(p.inbox, "SPEC.md"), readFileSync(join(p.inbox, "SPEC.md"), "utf8") + "\nhint\n");
   assert.match(verifyChain(p.chain, p.inbox).problems.join(), /content differs/);
+});
+
+test("symlinked SPEC.md in the outbox is refused, its target never crosses (regression)", () => {
+  const p = casePaths(join(tmp, "symlink-spec"));
+  for (const d of [p.outbox, p.inbox]) mkdirSync(d, { recursive: true });
+  append(p.chain, "genesis", {});
+  // The link target is a valid spec, so only the symlink check can stop it.
+  const hostFile = join(tmp, "host-file.md");
+  copyFileSync("scripted/smoke/SPEC.md", hostFile);
+  symlinkSync(hostFile, join(p.outbox, "SPEC.md"));
+
+  const r = crossWall(p);
+  assert.equal(r.ok, false);
+  assert.equal(r.hits[0]!.reason, "outbox SPEC.md is a symlink");
+  assert.deepEqual(readdirSync(p.inbox), []);
+  assert.equal(readChain(p.chain).at(-1)!.kind, "rejected");
 });

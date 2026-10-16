@@ -5,10 +5,10 @@
 import { copyFileSync, readFileSync, rmSync } from "node:fs";
 import { basename, join, resolve } from "node:path";
 import { append, readChain, sha256, verifyChain } from "./audit.ts";
-import { writeAtomic } from "./fsutil.ts";
+import { readUntrusted, UntrustedFileError, writeAtomic } from "./fsutil.ts";
 import { runOracle, type OracleReport } from "./oracle.ts";
 import { BwrapRunner, casePaths, type CasePaths } from "./sandbox.ts";
-import { scanWall, type WallHit } from "./wall.ts";
+import { scanWall, type WallHit, type WallReport } from "./wall.ts";
 
 export type FnStatus = "match" | "diverge" | "untested" | "not-built";
 
@@ -29,14 +29,23 @@ export type PipelineInput = {
   driver: string;
 };
 
-function crossWall(p: CasePaths) {
-  const spec = readFileSync(join(p.outbox, "SPEC.md"));
+/** Reads Room A's SPEC.md once, judges those bytes, and copies exactly those bytes. */
+export function crossWall(p: CasePaths): WallReport {
+  let spec: Buffer;
+  try {
+    spec = readUntrusted(join(p.outbox, "SPEC.md"));
+  } catch (e) {
+    if (!(e instanceof UntrustedFileError)) throw e;
+    const hits = [{ line: 0, reason: `outbox SPEC.md ${e.message}`, text: "" }];
+    append(p.chain, "rejected", { file: "SPEC.md", hits });
+    return { ok: false, hits, abi: null };
+  }
   const wall = scanWall(spec.toString("utf8"));
   if (!wall.ok) {
     append(p.chain, "rejected", { file: "SPEC.md", sha256: sha256(spec), hits: wall.hits });
     return wall;
   }
-  copyFileSync(join(p.outbox, "SPEC.md"), join(p.inbox, "SPEC.md"));
+  writeAtomic(join(p.inbox, "SPEC.md"), spec);
   append(p.chain, "crossing", { file: "SPEC.md", sha256: sha256(spec), bytes: spec.length });
   return wall;
 }
