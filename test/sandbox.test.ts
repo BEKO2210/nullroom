@@ -108,6 +108,10 @@ test("jail bounds private tmp storage", () => {
   });
   assert.notEqual(r.code, 0);
   assert.match(r.stderr, /No space left on device/);
+  const control = jail([], ["dd", "if=/dev/zero", "of=/tmp/large", "bs=4096", "count=64"], {
+    limits: { storageBytes: 1024 * 1024, fileBytes: 1024 * 1024 },
+  });
+  assert.equal(control.code, 0, control.stderr);
 });
 
 test("writable mounts are seeded and replace host contents after the run", () => {
@@ -134,7 +138,7 @@ test("jail refuses a symlink export and leaves the host directory unchanged", ()
   assert.equal(readFileSync(join(dir, "original"), "utf8"), "unchanged\n");
 });
 
-test("jail freezes background writers before exporting", () => {
+test("background writers do not survive the export", () => {
   const dir = mkdtempSync(join(tmpdir(), "nullroom-background-"));
   writeFileSync(join(dir, "value"), "seed\n");
   const marker = `nullroom-background-${process.pid}-${Date.now()}`;
@@ -261,4 +265,10 @@ test("jail memory limit holds across processes, not just per process", () => {
   assert.notEqual(r.stdout.trim(), "0 0");
   const control = jail(mounts, two, { limits: { memoryBytes: 256 << 20 } });
   assert.equal(control.stdout.trim(), "0 0", control.stderr);
+});
+
+test("writable mount paths outside a plain absolute path are refused", () => {
+  const dir = mkdtempSync(join(tmpdir(), "nullroom-badpath-"));
+  for (const at of ["/work/../etc", "relative", "/work dir", "/work\nx"])
+    assert.throws(() => jail([{ host: dir, at, rw: true }], ["true"]), /writable mount path not allowed/);
 });
