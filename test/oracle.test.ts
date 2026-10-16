@@ -87,3 +87,15 @@ test("symlinked source is refused before anything is compiled (regression)", () 
   assert.ok(!JSON.stringify(r).includes("TOP-SECRET"));
   assert.ok(!existsSync(join(tmp, "symlink", "abi-out")), "no compile jail was started");
 });
+
+test("a rebuild whose driver prints a non-object is a failed verdict, not a crash (regression)", () => {
+  const src = readFileSync(SOURCE, "utf8");
+  // A constructor that prints "null" and exits before the real driver output.
+  const evil = src.replace("#include <stdint.h>",
+    "#include <stdint.h>\n#include <unistd.h>\n__attribute__((constructor)) static void x(void){write(1,\"null\\n\",5);_exit(0);}");
+  const path = join(tmp, "null-output.c");
+  writeFileSync(path, evil);
+  const r = runOracle(input(path, "nullout"));
+  assert.equal(r.passed, false);
+  assert.ok(r.output?.error && /not a JSON object/.test(r.output.error), JSON.stringify(r.output));
+});
