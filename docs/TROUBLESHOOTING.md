@@ -1,7 +1,10 @@
 # Troubleshooting
 
-Start with `npm run doctor`. It prints one line for every host prerequisite;
-`FAIL` lines include the immediate fix. Nullroom supports Linux only. WSL and
+Start with `npm run doctor`. It probes the host prerequisites the jail needs
+(namespaces and mounts as `jail()` sets them, the same cgroup scope
+properties, tools on the jail's PATH) and prints one line per check; `FAIL`
+lines include the immediate fix. A green doctor means those probes passed on
+this host, not that every possible failure is ruled out. Nullroom supports Linux only. WSL and
 containers are untested, so a passing doctor result there is not a support
 claim.
 

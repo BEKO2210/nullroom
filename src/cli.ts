@@ -1,3 +1,4 @@
+#!/usr/bin/env -S node --experimental-strip-types
 // nullroom pipeline [--case DIR]   scripted end-to-end run on the smoke target
 // nullroom verify DIR              re-check a case's audit chain and inbox
 // nullroom doctor                  check host prerequisites
@@ -5,7 +6,7 @@ import { spawnSync } from "node:child_process";
 import { existsSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { verifyChain } from "./audit.ts";
-import { runDoctor } from "./doctor.ts";
+import { isPrerequisiteError, runDoctor } from "./doctor.ts";
 import { runPipeline } from "./pipeline.ts";
 import { casePaths } from "./sandbox.ts";
 
@@ -20,15 +21,13 @@ Exit codes:
   1  command or prerequisite failure
   2  usage error
 
+From a clone without installing: npm run <command> -- [args]
 Troubleshooting: docs/TROUBLESHOOTING.md`;
 
 function printUsage(): void {
   console.log(USAGE);
 }
 
-function prerequisiteFailure(message: string): boolean {
-  return /cgroup v2 limits unavailable|ptrace protection unavailable|systemd user manager|\bbwrap\b|unprivileged user namespace|\/usr\/bin\/prlimit|\bgcc\b/i.test(message);
-}
 
 function main(): number {
   const [cmd, ...rest] = process.argv.slice(2);
@@ -96,7 +95,7 @@ try {
 } catch (value) {
   const error = value instanceof Error ? value : new Error(String(value));
   console.error(`nullroom: ${error.message}`);
-  if (prerequisiteFailure(error.message)) console.error('hint: run "nullroom doctor"');
+  if (isPrerequisiteError(error.message)) console.error('hint: run "nullroom doctor"');
   if (process.env.NULLROOM_DEBUG === "1" && error.stack) console.error(error.stack);
   process.exitCode = 1;
 }
