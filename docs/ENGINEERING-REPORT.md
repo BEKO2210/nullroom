@@ -86,7 +86,8 @@ the fix. All three pass with the fix.
 | Risk | Status |
 | --- | --- |
 | Same-uid code in a jail can reach the export wrapper's fd 3 through `/proc` | Accepted; bounded by the archive check. See ARCHITECTURE.md. |
-| The wall is a lexical filter: it does not stop behaviour described in prose or a payload in an arbitrary encoding (e.g. base64) | Open; documented in README and CASE-STUDY |
+| The wall is a lexical filter: it does not stop behaviour described in prose or a payload in an arbitrary encoding (e.g. base64) | Open; documented in README, CASE-STUDY and CHANGELOG |
+| Several writable mounts are swapped one at a time (each atomic, not the group) | Open; no jail in the repo uses more than one writable mount; documented in README, ARCHITECTURE, CASE-STUDY and CHANGELOG |
 | Oracle verdicts only cover the fixed driver cases | By design; documented |
 | No written threat model yet | Open |
 | Rooms are scripted; no agent is connected to a room | Out of scope by decision |

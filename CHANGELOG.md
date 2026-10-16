@@ -20,8 +20,8 @@ First release candidate. Linux only.
 - Jails (`jail()`): bubblewrap namespaces with no network, no `/home` and an
   empty environment; per-process `prlimit`; a rootless cgroup v2 scope for
   whole-jail memory, tasks and CPU; size-limited writable tmpfs exported as a
-  validated archive and swapped in atomically; crash recovery of interrupted
-  swaps. Fails closed without cgroup delegation or with Yama
+  validated archive and swapped in with `rename`, atomically per mount; crash
+  recovery of interrupted swaps. Fails closed without cgroup delegation or with Yama
   `ptrace_scope` below 1.
 - Oracle: ABI check against prototypes generated from the approved spec, and
   a fixed test driver run against original and rebuild in separate jails.
@@ -39,6 +39,13 @@ First release candidate. Linux only.
 - The export file descriptor is reachable by same-uid code in a jail through
   `/proc`; in-command tampering is overwritten by the wrapper and the archive
   is validated (see docs/ARCHITECTURE.md).
+- The wall is a lexical filter: it rejects content that looks like code,
+  addresses or disassembly, but not behaviour leaked in plain prose or a
+  payload in an arbitrary encoding such as base64.
+- Writable mounts are swapped in one at a time. Each swap is atomic (stage,
+  then `rename`), but a jail with several writable mounts is not updated
+  atomically as a whole: a failure between two swaps leaves the earlier mounts
+  updated. Rooms and the oracle currently use one writable mount per jail.
 - No written threat model yet (template only).
 
-[0.1.0-rc.1]: https://github.com/BEKO2210/nullroom/commits/main
+[0.1.0-rc.1]: https://github.com/BEKO2210/nullroom/releases/tag/v0.1.0-rc.1

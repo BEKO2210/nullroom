@@ -55,7 +55,10 @@ The limits are stated honestly. The oracle only covers what its driver
 exercises. The export file descriptor is reachable by same-uid code in the jail
 through `/proc`; it is harmless because the trusted wrapper regenerates the
 archive after killing all jail processes, and that is documented as measured
-behavior rather than claimed away. Rooms are scripted; no agent is wired to a
+behavior rather than claimed away. The wall is a lexical filter: it rejects
+code-like content but cannot stop behaviour leaked in prose or a payload in an
+arbitrary encoding such as base64. Writable mounts are swapped in atomically
+one at a time, not as a group. Rooms are scripted; no agent is wired to a
 room. Linux only.
 
 ## Technical challenges
