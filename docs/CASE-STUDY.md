@@ -97,8 +97,8 @@ regression test that fails on the pre-fix code.
 
 ## CI and test results
 
-As of `main` at the latest run: 49 tests (core 12, sandbox 26, oracle 6,
-pipeline 5), strict typecheck, `npm audit` clean, end-to-end pipeline and
+As of `main` at the latest run: 63 tests (core 14, sandbox 26, oracle 6,
+pipeline 8, cli 9), strict typecheck, `npm audit` clean, end-to-end pipeline and
 chain verification, Sigstore attestation on `main`. Every PR runs the same
 checks on both the push and the merge commit; `main` is protected and requires
 the `test` check. See the [engineering report](ENGINEERING-REPORT.md) for
@@ -113,7 +113,7 @@ hidden:
 
 - **Claude Code** did the architecture, most of the code, integration and
   verification on the host.
-- **Codex CLI** implemented three scoped work packages in isolated worktrees.
+- **Codex CLI** implemented four scoped work packages in isolated worktrees.
   Each time it could not run the jail tests in its own sandbox, it said so
   instead of claiming success.
 - **Cursor** (a Grok model) did independent read-only reviews and found real

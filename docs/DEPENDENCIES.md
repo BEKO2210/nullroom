@@ -1,5 +1,39 @@
 # Dependencies
 
+## Ubuntu 24.04 bootstrap
+
+Tested on a clean Ubuntu 24.04 host. Each line maps to a `doctor` check.
+
+```bash
+# system packages (bubblewrap, gcc, tar, coreutils/timeout, util-linux/prlimit, git, gh)
+sudo apt-get update
+sudo apt-get install -y bubblewrap gcc tar coreutils util-linux git gh
+
+# Node.js 22 (NodeSource; or nvm). Ubuntu's own nodejs is older than 22.6.
+curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash -
+sudo apt-get install -y nodejs
+
+# unprivileged user namespaces (Ubuntu 24.04 blocks them by default)
+sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+
+# a systemd user manager with cgroup delegation, for the jail scopes
+sudo loginctl enable-linger "$USER"   # then log out and back in, or: machinectl shell
+
+# Yama ptrace protection (usually already 1 on Ubuntu)
+sudo sysctl -w kernel.yama.ptrace_scope=1
+```
+
+`sudo sysctl -w` changes last until reboot; make them persistent through your
+host's sysctl policy only if that matches your security requirements. Then:
+
+```bash
+git clone https://github.com/BEKO2210/nullroom && cd nullroom
+npm ci && npm run doctor
+```
+
+`gh` is needed only to download and verify a release (see
+[RELEASING.md](RELEASING.md)); authenticate it once with `gh auth login`.
+
 ## npm
 
 | Package | Kind | Why |
@@ -25,6 +59,8 @@ Checked by `npm run doctor`; fixes in [TROUBLESHOOTING.md](TROUBLESHOOTING.md).
 | Yama `ptrace_scope` ≥ 1 | jail preflight | value 1 |
 | util-linux `prlimit`, coreutils `timeout`, `tar` | per-process limits, export | Ubuntu 24.04 packages |
 | gcc | smoke target, oracle builds | gcc 13.3 |
+| git | clone, release archive | git 2.43 |
+| GitHub CLI `gh` (optional) | download and verify a release | gh 2.96 |
 
 Other distributions, WSL and containers are untested. Nothing here is a
 support promise beyond the "Tested on" column.

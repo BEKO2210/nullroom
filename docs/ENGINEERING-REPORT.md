@@ -1,6 +1,6 @@
 # Engineering report
 
-State as of 2026-10-16, `main` at `14bb8ed` (release candidate 0.1.0-rc.1 branch adds docs and the release workflow only). Every number below comes from a
+State as of 2026-10-16, `main` at `14bb8ed` (release candidate 0.1.0-rc.1 branch adds docs, the release workflow, and three security fixes: inbox deletion/symlink detection, strict case ownership, SemVer validation in the release workflow). Every number below comes from a
 CI run or a command you can repeat; run IDs link to GitHub Actions.
 
 ## Reproduce
@@ -86,7 +86,7 @@ the fix. All three pass with the fix.
 | Risk | Status |
 | --- | --- |
 | Same-uid code in a jail can reach the export wrapper's fd 3 through `/proc` | Accepted; bounded by the archive check. See ARCHITECTURE.md. |
-| The export archive is buffered in memory on the host (up to `storageBytes` × writable mounts + 16 MiB) | Open |
+| The wall is a lexical filter: it does not stop behaviour described in prose or a payload in an arbitrary encoding (e.g. base64) | Open; documented in README and CASE-STUDY |
 | Oracle verdicts only cover the fixed driver cases | By design; documented |
 | No written threat model yet | Open |
 | Rooms are scripted; no agent is connected to a room | Out of scope by decision |
