@@ -50,11 +50,13 @@ PASSED
 | What was checked is what crossed | `SPEC.md` is read once without following symlinks; those exact bytes are scanned, hashed and copied. | `symlinked SPEC.md in the outbox is refused …` |
 | Room B's code never runs on the host | Builds and runs happen in jails with no network, no `/home`, empty environment; original and rebuild never share a jail. | `oracle jail: no host environment, no /home, only one library` |
 | A jail cannot exhaust the host | Per process (`prlimit`) and per jail (cgroup v2 scope): memory, tasks, CPU, file size, open files. | `jail memory limit holds across processes, not just per process` and the other `jail …` tests in `test/sandbox.test.ts` |
+| A jail cannot fill the host disk | Writable mounts and `/tmp` are size-limited tmpfs; the result is exported as a checked archive (regular files and directories inside the mounts only) and swapped in atomically. | `jail bounds total writable storage, with a larger-limit control`, `jail refuses a symlink export …` |
 | The record is tamper-evident | Hash chain over every room run, crossing and verdict; inbox files are checked against it. | `audit: edited or removed entries break the chain`, `tampering with the inbox after the run is detected` |
 | CI results have provenance | `report.json` and `audit_chain.json` are attested with Sigstore on `main`. | `gh attestation verify report.json -R BEKO2210/nullroom` |
 | A wrong rebuild fails | Off-by-one faults, a changed flag bit and a wrong signature are caught. | `test/oracle.test.ts`, `test/pipeline.test.ts` |
 
-Details: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) ·
+Details: [Architecture](docs/ARCHITECTURE.md) ·
+[Engineering report](docs/ENGINEERING-REPORT.md) ·
 [ADR 0001: provenance](docs/adr/0001-audit-provenance.md)
 
 ## How it works
