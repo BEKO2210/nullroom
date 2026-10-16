@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { before, test } from "node:test";
@@ -72,4 +72,18 @@ test("oracle jail: no host environment, no /home, only one library", () => {
   for (const name of env!.trim().split("\n")) assert.ok(allowed.has(name), `unexpected env var ${name}`);
   assert.match(home!, /No such file or directory/);
   assert.equal(libs!.trim(), "libsmoke.so");
+});
+
+test("symlinked source is refused before anything is compiled (regression)", () => {
+  const secret = join(tmp, "host-secret.txt");
+  writeFileSync(secret, "TOP-SECRET-HOST-CONTENT\n");
+  const link = join(tmp, "linked.c");
+  symlinkSync(secret, link);
+
+  const r = runOracle(input(link, "symlink"));
+  assert.equal(r.passed, false);
+  assert.equal(r.abi.errors[0]!.message, "source is a symlink");
+  assert.equal(r.output, null);
+  assert.ok(!JSON.stringify(r).includes("TOP-SECRET"));
+  assert.ok(!existsSync(join(tmp, "symlink", "abi-out")), "no compile jail was started");
 });

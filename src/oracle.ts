@@ -9,6 +9,7 @@
 //   rebuilt jail   driver + rebuilt library (ro), nothing writable
 // Every jail has no network, no /home and an empty environment.
 import { copyFileSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { readUntrusted, UntrustedFileError } from "./fsutil.ts";
 import { basename, join, resolve } from "node:path";
 import { prototypes } from "./abi.ts";
 import { jail, type Mount, type RunResult } from "./sandbox.ts";
@@ -62,7 +63,7 @@ export function runAgainst(exe: string, libFile: string, argv: string[] = [CHECK
   return jail(mounts, argv, { env: { LD_LIBRARY_PATH: LIB_DIR }, timeoutMs: 30_000 });
 }
 
-export function abiCheck(i: OracleInput): AbiCheck {
+function abiCheck(i: OracleInput): AbiCheck {
   const wall = scanWall(readFileSync(i.spec, "utf8"));
   if (!wall.abi)
     return { ok: false, errors: [{ file: "SPEC.md", line: 0, message: `rejected by wall: ${wall.hits.map((h) => h.reason).join(", ")}` }] };
@@ -74,7 +75,7 @@ export function abiCheck(i: OracleInput): AbiCheck {
   return { ok: r.code === 0, errors: r.code === 0 ? [] : cleanCompilerErrors(r.stderr) };
 }
 
-export function outputCheck(i: OracleInput): OutputCheck {
+function outputCheck(i: OracleInput): OutputCheck {
   const lib = basename(i.originalLib);
   const outDir = join(i.workDir, "build");
   mkdirSync(outDir, { recursive: true });
@@ -110,7 +111,22 @@ export function outputCheck(i: OracleInput): OutputCheck {
   return { ok: diff.length === 0, diff, keys };
 }
 
-export function runOracle(i: OracleInput): OracleReport {
+export function runOracle(input: OracleInput): OracleReport {
+  // Room B wrote the source. Snapshot it as a regular file the oracle owns, so a
+  // symlink cannot pull a host file into the compile jail and the content cannot
+  // change between the ABI check and the build.
+  let i: OracleInput;
+  try {
+    const dir = join(input.workDir, "input");
+    mkdirSync(dir, { recursive: true });
+    const snapshot = join(dir, "reconstructed.c");
+    writeFileSync(snapshot, readUntrusted(input.source));
+    i = { ...input, source: snapshot };
+  } catch (e) {
+    if (!(e instanceof UntrustedFileError)) throw e;
+    const abi = { ok: false, errors: [{ file: "reconstructed.c", line: 0, message: `source ${e.message}` }] };
+    return { passed: false, abi, output: null };
+  }
   const abi = abiCheck(i);
   const output = abi.ok ? outputCheck(i) : null;
   return { passed: abi.ok && !!output?.ok, abi, output };
