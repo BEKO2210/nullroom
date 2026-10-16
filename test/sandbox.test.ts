@@ -362,3 +362,14 @@ test("recovery keeps all backups when the host dir is missing and the choice is 
   assert.equal(readFileSync(join(host, "a"), "utf8"), "A\n");
   assert.deepEqual(readdirSync(parent).filter((n) => n.startsWith("work.next-")), []);
 });
+
+test("a seeding failure leaves the host directory unchanged (regression)", () => {
+  const dir = mkdtempSync(join(tmpdir(), "nullroom-seedfail-"));
+  // Two 48 KiB files: seeding them into a 64 KiB tmpfs must fail.
+  writeFileSync(join(dir, "a"), Buffer.alloc(48 * 1024, 1));
+  writeFileSync(join(dir, "b"), Buffer.alloc(48 * 1024, 2));
+  const r = jail([{ host: dir, at: "/work", rw: true }], ["true"], { limits: { storageBytes: 64 * 1024 } });
+  assert.notEqual(r.code, 0);
+  assert.equal(statSync(join(dir, "a")).size, 48 * 1024);
+  assert.equal(statSync(join(dir, "b")).size, 48 * 1024); // both originals intact
+});
