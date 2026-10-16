@@ -1,0 +1,66 @@
+import assert from "node:assert/strict";
+import { copyFileSync, existsSync, mkdtempSync, readdirSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join, resolve } from "node:path";
+import { spawnSync } from "node:child_process";
+import { before, test } from "node:test";
+import { readChain, verifyChain } from "../src/audit.ts";
+import { runPipeline } from "../src/pipeline.ts";
+import { casePaths } from "../src/sandbox.ts";
+
+const LIB = resolve("targets/smoke/out/libsmoke.so");
+const tmp = mkdtempSync(join(tmpdir(), "nullroom-pipe-"));
+const base = { targetLib: LIB, driver: resolve("targets/smoke/smoke_check.c") };
+
+before(() => {
+  if (!existsSync(LIB)) spawnSync("targets/smoke/build.sh", { stdio: "ignore" });
+});
+
+test("scripted run passes end to end with every function matched", () => {
+  const r = runPipeline({ ...base, caseDir: join(tmp, "good"), scripted: resolve("scripted/smoke") });
+  assert.equal(r.passed, true, JSON.stringify(r.oracle?.output?.diff ?? r.oracle?.abi));
+  assert.equal(Object.keys(r.functions).length, 10);
+  assert.deepEqual(new Set(Object.values(r.functions)), new Set(["match"]));
+  assert.equal(r.audit.ok, true);
+
+  const kinds = readChain(casePaths(r.case).chain).map((e) => e.kind);
+  assert.deepEqual(kinds, ["genesis", "room-run", "crossing", "room-run", "oracle"]);
+  assert.deepEqual(JSON.parse(readFileSync(join(r.case, "report.json"), "utf8")).audit.head, r.audit.head);
+});
+
+test("spec that fails the wall never reaches room B", () => {
+  const dir = join(tmp, "leaky-scripted");
+  mkdirSync(dir);
+  const spec = readFileSync("scripted/smoke/SPEC.md", "utf8").replace("## sm_clamp\n", "## sm_clamp\n\nBound check sits at 0x1140.\n");
+  writeFileSync(join(dir, "SPEC.md"), spec);
+  copyFileSync("scripted/smoke/reconstructed.c", join(dir, "reconstructed.c"));
+
+  const r = runPipeline({ ...base, caseDir: join(tmp, "leaky"), scripted: dir });
+  assert.equal(r.passed, false);
+  assert.equal(r.wall.hits[0]!.reason, "hex literal");
+  assert.equal(r.oracle, null);
+  const p = casePaths(r.case);
+  assert.deepEqual(readdirSync(p.inbox), []);
+  assert.deepEqual(readdirSync(p.workspace), []);
+  assert.ok(readChain(p.chain).some((e) => e.kind === "rejected"));
+});
+
+test("faulty reconstruction is reported per function", () => {
+  const dir = join(tmp, "faulty-scripted");
+  mkdirSync(dir);
+  copyFileSync("scripted/smoke/SPEC.md", join(dir, "SPEC.md"));
+  const src = readFileSync("scripted/smoke/reconstructed.c", "utf8");
+  writeFileSync(join(dir, "reconstructed.c"), src.replace("if (flags & 8u)", "if (flags & 16u)"));
+
+  const r = runPipeline({ ...base, caseDir: join(tmp, "faulty"), scripted: dir });
+  assert.equal(r.passed, false);
+  assert.equal(r.functions.sm_score, "diverge");
+  assert.equal(r.functions.sm_clamp, "match");
+});
+
+test("tampering with the inbox after the run is detected", () => {
+  const r = runPipeline({ ...base, caseDir: join(tmp, "tamper"), scripted: resolve("scripted/smoke") });
+  const p = casePaths(r.case);
+  writeFileSync(join(p.inbox, "SPEC.md"), readFileSync(join(p.inbox, "SPEC.md"), "utf8") + "\nhint\n");
+  assert.match(verifyChain(p.chain, p.inbox).problems.join(), /content differs/);
+});

@@ -8,6 +8,8 @@
     "node": ">=22.6"
   },
   "scripts": {
-    "test": "node --experimental-strip-types --test test/*.test.ts"
+    "test": "node --experimental-strip-types --test test/*.test.ts",
+    "pipeline": "node --experimental-strip-types src/cli.ts pipeline",
+    "verify": "node --experimental-strip-types src/cli.ts verify"
   }
 }

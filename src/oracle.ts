@@ -17,7 +17,7 @@ import { scanWall } from "./wall.ts";
 export type CompileError = { file: string; line: number; message: string };
 export type AbiCheck = { ok: boolean; errors: CompileError[] };
 export type DiffRow = { key: string; original: unknown; rebuilt: unknown };
-export type OutputCheck = { ok: boolean; diff: DiffRow[]; error?: string };
+export type OutputCheck = { ok: boolean; diff: DiffRow[]; keys: string[]; error?: string };
 export type OracleReport = { passed: boolean; abi: AbiCheck; output: OutputCheck | null };
 
 export type OracleInput = {
@@ -81,9 +81,9 @@ export function outputCheck(i: OracleInput): OutputCheck {
   const cflags = i.cflags ?? ["-O2", "-fPIC", "-shared", "-fvisibility=hidden"];
 
   const build = compileJail(i, outDir, ["gcc", ...cflags, "-o", `/out/${lib}`, "/src/reconstructed.c"]);
-  if (build.code !== 0) return { ok: false, diff: [], error: `rebuild failed: ${JSON.stringify(cleanCompilerErrors(build.stderr))}` };
+  if (build.code !== 0) return { ok: false, diff: [], keys: [], error: `rebuild failed: ${JSON.stringify(cleanCompilerErrors(build.stderr))}` };
   const link = compileJail(i, outDir, ["gcc", "-O0", "-o", "/out/check", "/src/driver.c", "-L/out", `-l:${lib}`]);
-  if (link.code !== 0) return { ok: false, diff: [], error: `driver build failed: ${JSON.stringify(cleanCompilerErrors(link.stderr))}` };
+  if (link.code !== 0) return { ok: false, diff: [], keys: [], error: `driver build failed: ${JSON.stringify(cleanCompilerErrors(link.stderr))}` };
 
   // The original lives in its own directory so its jail never sees the rebuild.
   const origDir = join(i.workDir, "original");
@@ -100,13 +100,14 @@ export function outputCheck(i: OracleInput): OutputCheck {
     original = parse(runAgainst(exe, join(origDir, lib)), "original");
     rebuilt = parse(runAgainst(exe, join(outDir, lib)), "rebuild");
   } catch (e) {
-    return { ok: false, diff: [], error: (e as Error).message };
+    return { ok: false, diff: [], keys: [], error: (e as Error).message };
   }
 
-  const diff = [...new Set([...Object.keys(original), ...Object.keys(rebuilt)])]
+  const keys = [...new Set([...Object.keys(original), ...Object.keys(rebuilt)])];
+  const diff = keys
     .filter((k) => JSON.stringify(original[k]) !== JSON.stringify(rebuilt[k]))
     .map((key) => ({ key, original: original[key], rebuilt: rebuilt[key] }));
-  return { ok: diff.length === 0, diff };
+  return { ok: diff.length === 0, diff, keys };
 }
 
 export function runOracle(i: OracleInput): OracleReport {
