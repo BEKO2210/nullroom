@@ -1,6 +1,6 @@
 # Engineering report
 
-State as of 2026-10-16, `main` at `d01be94`. Every number below comes from a
+State as of 2026-10-16, `main` at `14bb8ed` (release candidate 0.1.0-rc.1 branch adds docs and the release workflow only). Every number below comes from a
 CI run or a command you can repeat; run IDs link to GitHub Actions.
 
 ## Reproduce
@@ -10,7 +10,9 @@ git clone https://github.com/BEKO2210/nullroom && cd nullroom
 npm ci
 targets/smoke/build.sh
 npm run typecheck          # strict tsc, expect 0 errors
-npm test                   # expect 44 pass, 0 fail
+npm run doctor             # expect 8 checks ok
+npm test                   # expect 60 pass, 0 fail
+npm run demo               # expect "every check behaved as expected"
 npm run pipeline           # expect PASSED, 10 functions "match"
 npm run verify work/smoke  # expect "valid, 5 entries"
 ```
@@ -26,7 +28,8 @@ gh attestation verify report.json -R BEKO2210/nullroom
 
 | Check | Result | Evidence |
 | --- | --- | --- |
-| Tests | 44 pass, 0 fail (core 12, sandbox 21, oracle 6, pipeline 5) | CI run [38887755513](https://github.com/BEKO2210/nullroom/actions/runs/38887755513) |
+| Tests | 60 pass, 0 fail (core 12, sandbox 26, oracle 6, pipeline 7, cli 9) | CI run [38953527892](https://github.com/BEKO2210/nullroom/actions/runs/38953527892) |
+| Clean-clone reproduction | empty environment (`env -i`), fresh clone: install, build, typecheck, 49/49 tests (at `46b15d0`), pipeline, verify all pass; `libsmoke.so` sha256 identical to the developer build | local run, 2026-10-16 |
 | Typecheck | `tsc` strict, `noUncheckedIndexedAccess`, 0 errors | same run |
 | Dependencies | 2 dev dependencies (`typescript`, `@types/node`), 0 runtime; `npm audit` 0 vulnerabilities | same run |
 | End-to-end pipeline | PASSED, chain valid | same run |
@@ -45,6 +48,9 @@ gh attestation verify report.json -R BEKO2210/nullroom
 | Per-process and jail-wide limits | [PR #1](https://github.com/BEKO2210/nullroom/pull/1) | Codex CLI, then Claude Code | Cursor review | per-process limits multiply with fork (high); vacuous file-size test; missing coverage |
 | Architecture document | [PR #2](https://github.com/BEKO2210/nullroom/pull/2) | Claude Code | test names checked against `test/` | – |
 | Bounded writable storage | [PR #4](https://github.com/BEKO2210/nullroom/pull/4) | Codex CLI, then Claude Code | Cursor security review | non-atomic host replacement; editable export list; test claimed more than it proved |
+| Export hardening, crash recovery | [PR #6](https://github.com/BEKO2210/nullroom/pull/6) | Codex CLI, then Claude Code | Cursor security review; CI | recovery deleted all backups when ambiguous; a test asserted a false property (fd unreachable); aggregate-memory test flaky on CI |
+| Five-step demo, run in CI | [PR #8](https://github.com/BEKO2210/nullroom/pull/8) | Claude Code | CI runs it | – |
+| doctor, CLI errors, help, troubleshooting | [PR #9](https://github.com/BEKO2210/nullroom/pull/9) | Codex CLI, then Claude Code | Cursor review | `--case` wiped arbitrary directories (Claude); own case wiped before prerequisite failure; doctor probes weaker than the jail (Cursor) |
 
 The three security fixes were checked against the previous source: the wall
 and oracle regression tests failed on their assertions; the wall-crossing test
