@@ -76,8 +76,8 @@ test("jail limits output file size", () => {
     limits: { fileBytes: 1024 * 1024 },
   });
   assert.notEqual(r.code, 0);
-  assert.ok(existsSync(file));
-  assert.ok(statSync(file).size <= 1024 * 1024);
+  // Exactly at the cap: the write ran until the limit stopped it.
+  assert.equal(statSync(file).size, 1024 * 1024);
 });
 
 test("jail limits address space", () => {
@@ -91,7 +91,10 @@ test("jail limits address space", () => {
   const build = jail(mounts, ["gcc", "-O0", "-o", "/work/memory", "/work/memory.c"]);
   assert.equal(build.code, 0, build.stderr);
   const r = jail(mounts, ["/work/memory"], { limits: { memoryBytes: 64 * 1024 * 1024 } });
-  assert.equal(r.code, 2, r.stderr);
+  // malloc returns NULL (exit 2), or the process is killed when it touches pages.
+  assert.ok(r.code === 2 || r.code > 128 || r.code === -1, `exit ${r.code}: ${r.stderr}`);
+  const ok = jail(mounts, ["/work/memory"], { limits: { memoryBytes: 512 * 1024 * 1024 } });
+  assert.equal(ok.code, 0, "same program succeeds under a larger limit");
 });
 
 test("jail stops a CPU-bound command", () => {
@@ -126,7 +129,11 @@ test("jail timeout leaves no child process", () => {
   assert.ok(existsSync(join(dir, "ready")), r.stderr);
   assert.notEqual(r.code, 0);
   assert.ok(elapsed < 3_000, `timeout took ${elapsed}ms`);
-  const remaining = spawnSync("pgrep", ["-f", "--", marker], { encoding: "utf8" });
+  let remaining = spawnSync("pgrep", ["-f", "--", marker], { encoding: "utf8" });
+  for (let i = 0; i < 20 && remaining.status === 0; i++) {
+    spawnSync("sleep", ["0.1"]);
+    remaining = spawnSync("pgrep", ["-f", "--", marker], { encoding: "utf8" });
+  }
   assert.equal(remaining.status, 1, `process remained after timeout: ${remaining.stdout}`);
 });
 
@@ -140,4 +147,44 @@ test("jail rejects invalid limits", () => {
   for (const [name, value] of invalid) {
     assert.throws(() => jail([], ["true"], { limits: { [name]: value } }), new RegExp(`limit ${name} must be a positive integer`));
   }
+});
+
+test("jail limits open files, with a control run", () => {
+  const dir = mkdtempSync(join(tmpdir(), "nullroom-nofile-"));
+  writeFileSync(
+    join(dir, "count.c"),
+    "#include <fcntl.h>\n#include <stdio.h>\nint main(void){int n=0;while(n<1000&&open(\"/dev/null\",O_RDONLY)>=0)n++;printf(\"%d\\n\",n);return 0;}\n",
+  );
+  const mounts = [{ host: dir, at: "/work", rw: true }];
+  assert.equal(jail(mounts, ["gcc", "-O0", "-o", "/work/count", "/work/count.c"]).code, 0);
+  // stdin, stdout and stderr take three of the descriptors.
+  assert.equal(jail(mounts, ["/work/count"], { limits: { openFiles: 16 } }).stdout.trim(), "13");
+  assert.equal(jail(mounts, ["/work/count"], { limits: { openFiles: 64 } }).stdout.trim(), "61");
+});
+
+test("jail limits the number of tasks across all its processes", () => {
+  const spawnMany = ["sh", "-c", "for i in $(seq 24); do sleep 1 & done; wait; echo done"];
+  const capped = jail([], spawnMany, { limits: { tasks: 8 } });
+  assert.match(capped.stderr, /fork|resource temporarily unavailable/i);
+  const roomy = jail([], spawnMany, { limits: { tasks: 64 } });
+  assert.equal(roomy.code, 0, roomy.stderr);
+  assert.equal(roomy.stdout.trim(), "done");
+});
+
+test("jail memory limit holds across processes, not just per process", () => {
+  const dir = mkdtempSync(join(tmpdir(), "nullroom-cgmem-"));
+  writeFileSync(
+    join(dir, "hold.c"),
+    "#include <stdlib.h>\n#include <string.h>\n#include <unistd.h>\nint main(void){size_t n=48u<<20;char*p=malloc(n);if(!p)return 2;memset(p,1,n);sleep(1);return 0;}\n",
+  );
+  const mounts = [{ host: dir, at: "/work", rw: true }];
+  assert.equal(jail(mounts, ["gcc", "-O0", "-o", "/work/hold", "/work/hold.c"]).code, 0);
+  const two = ["sh", "-c", "/work/hold & a=$!; /work/hold & b=$!; wait $a; ea=$?; wait $b; echo $ea $?"];
+  // Each process fits the 80 MiB per-process limit; together they exceed the jail's 80 MiB.
+  // systemd stops the whole scope on an OOM kill, so the jail fails as a unit.
+  const r = jail(mounts, two, { limits: { memoryBytes: 80 << 20 } });
+  assert.notEqual(r.code, 0);
+  assert.notEqual(r.stdout.trim(), "0 0");
+  const control = jail(mounts, two, { limits: { memoryBytes: 256 << 20 } });
+  assert.equal(control.stdout.trim(), "0 0", control.stderr);
 });

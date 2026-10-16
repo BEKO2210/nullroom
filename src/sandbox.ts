@@ -16,7 +16,9 @@ import { append } from "./audit.ts";
 export type Room = "A" | "B";
 export type Mount = { host: string; at: string; rw: boolean };
 export type RunResult = { code: number; stdout: string; stderr: string };
-export type Limits = { memoryBytes: number; fileBytes: number; cpuSeconds: number; openFiles: number };
+// memoryBytes and tasks apply twice: per process (prlimit) and for the whole
+// jail (cgroup v2 scope via systemd-run), so forking does not multiply them.
+export type Limits = { memoryBytes: number; fileBytes: number; cpuSeconds: number; openFiles: number; tasks: number };
 export type RunOpts = {
   extraRo?: Mount[];
   net?: boolean;
@@ -30,7 +32,33 @@ export const DEFAULT_LIMITS: Limits = {
   fileBytes: 64 * 1024 * 1024,
   cpuSeconds: 60,
   openFiles: 256,
+  tasks: 64,
 };
+
+function resolveLimits(partial: Partial<Limits> = {}): Limits {
+  const limits = { ...DEFAULT_LIMITS, ...partial };
+  for (const [name, value] of Object.entries(limits)) {
+    if (!Number.isInteger(value) || value <= 0) throw new Error(`limit ${name} must be a positive integer`);
+  }
+  return limits;
+}
+
+const SYSTEMD_RUN = "/usr/bin/systemd-run";
+// systemd-run --user reaches the user manager through XDG_RUNTIME_DIR; nothing
+// else from the host environment is passed on, and bwrap clears it anyway.
+const userManagerEnv = () => ({ XDG_RUNTIME_DIR: process.env.XDG_RUNTIME_DIR ?? `/run/user/${process.getuid?.()}` });
+
+let cgroupReady: boolean | undefined;
+
+/** True when a rootless cgroup v2 scope with memory and pids limits can be created. */
+export function cgroupAvailable(): boolean {
+  cgroupReady ??=
+    spawnSync(SYSTEMD_RUN, ["--user", "--scope", "--quiet", "-p", "TasksMax=4", "-p", "MemoryMax=16M", "/usr/bin/true"], {
+      env: userManagerEnv(),
+      timeout: 10_000,
+    }).status === 0;
+  return cgroupReady;
+}
 
 export interface RoomRunner {
   run(room: Room, argv: string[], opts?: RunOpts): RunResult;
@@ -80,10 +108,7 @@ const MERGED_USR = [
 ] as const;
 
 export function bwrapArgs(mounts: Mount[], argv: string[], opts: RunOpts = {}): string[] {
-  const limits = { ...DEFAULT_LIMITS, ...opts.limits };
-  for (const [name, value] of Object.entries(limits)) {
-    if (!Number.isInteger(value) || value <= 0) throw new Error(`limit ${name} must be a positive integer`);
-  }
+  const limits = resolveLimits(opts.limits);
   const a = ["--unshare-all", "--die-with-parent", "--new-session", "--clearenv"];
   if (opts.net) a.push("--share-net");
   for (const d of SYSTEM_RO) if (existsSync(d)) a.push("--ro-bind", d, d);
@@ -105,12 +130,25 @@ export function bwrapArgs(mounts: Mount[], argv: string[], opts: RunOpts = {}): 
   ];
 }
 
-/** One command in a fresh namespace with exactly these mounts. */
+/**
+ * One command in a fresh namespace with exactly these mounts, inside its own
+ * cgroup scope. Fails closed: without cgroup delegation nothing runs.
+ */
 export function jail(mounts: Mount[], argv: string[], opts: RunOpts = {}): RunResult {
-  const r = spawnSync("/usr/bin/bwrap", bwrapArgs(mounts, argv, opts), {
+  const limits = resolveLimits(opts.limits);
+  if (!cgroupAvailable())
+    throw new Error("cgroup v2 limits unavailable: needs a systemd user manager with memory and pids delegation");
+  const scope = [
+    "--user", "--scope", "--quiet", "--collect",
+    "-p", `MemoryMax=${limits.memoryBytes}`,
+    "-p", "MemorySwapMax=0",
+    "-p", `TasksMax=${limits.tasks}`,
+    "-p", "CPUQuota=100%",
+  ];
+  const r = spawnSync(SYSTEMD_RUN, [...scope, "/usr/bin/bwrap", ...bwrapArgs(mounts, argv, opts)], {
     encoding: "utf8",
     timeout: opts.timeoutMs ?? 120_000,
-    env: {},
+    env: userManagerEnv(),
   });
   return { code: r.status ?? -1, stdout: r.stdout ?? "", stderr: r.stderr ?? "" };
 }
