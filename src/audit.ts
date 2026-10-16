@@ -57,9 +57,19 @@ export function verifyChain(path: string, inboxDir?: string): ChainVerdict {
   });
   if (chain[0]?.kind !== "genesis") problems.push("chain does not start with genesis");
 
-  if (inboxDir && existsSync(inboxDir)) {
+  if (inboxDir) {
     const crossed = new Map<string, string>();
     for (const e of chain) if (e.kind === "crossing") crossed.set(String(e.data.file), String(e.data.sha256));
+    if (!existsSync(inboxDir)) {
+      // The whole inbox is gone: every recorded crossing is missing.
+      if (crossed.size) for (const f of crossed.keys()) problems.push(`inbox/${f}: crossed but missing`);
+      else problems.push("inbox directory does not exist");
+      return { ok: problems.length === 0, entries: chain.length, problems };
+    }
+    if (!lstatSync(inboxDir).isDirectory()) {
+      problems.push("inbox is not a directory");
+      return { ok: false, entries: chain.length, problems };
+    }
     const present = new Set(readdirSync(inboxDir));
     for (const f of present) {
       const want = crossed.get(f);
