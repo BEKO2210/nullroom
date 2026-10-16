@@ -324,20 +324,15 @@ test("jail limits the number of tasks across all its processes", () => {
 
 test("jail memory limit holds across processes, not just per process", () => {
   const dir = mkdtempSync(join(tmpdir(), "nullroom-cgmem-"));
-  writeFileSync(
-    join(dir, "hold.c"),
-    "#include <stdlib.h>\n#include <string.h>\n#include <unistd.h>\nint main(void){size_t n=48u<<20;char*p=malloc(n);if(!p)return 2;memset(p,1,n);sleep(1);return 0;}\n",
-  );
+  writeFileSync(join(dir, "pair.c"), "#include <sys/wait.h>\n" + "#include <stdlib.h>\n#include <string.h>\n#include <unistd.h>\n/* Each half allocates SIZE, touches it, then blocks on a pipe until the other\n   half has also allocated. Both peaks therefore overlap deterministically. */\nstatic void grab(size_t size, int rfd, int wfd) {\n  char *p = malloc(size);\n  if (!p) _exit(2);\n  memset(p, 1, size);\n  char c = 1;\n  if (write(wfd, &c, 1) != 1) _exit(3); /* announce: allocated */\n  if (read(rfd, &c, 1) != 1) _exit(4);  /* wait for the other half */\n}\nint main(int argc, char **argv) {\n  size_t size = (size_t)atoi(argv[1]) << 20;\n  int ab[2], ba[2];\n  if (pipe(ab) || pipe(ba)) return 5;\n  pid_t pid = fork();\n  if (pid < 0) return 6;\n  if (pid == 0) { grab(size, ab[0], ba[1]); _exit(0); }\n  grab(size, ba[0], ab[1]);\n  int st; waitpid(pid, &st, 0);\n  return 0;\n}" + "\n");
   const mounts = [{ host: dir, at: "/work", rw: true }];
-  assert.equal(jail(mounts, ["gcc", "-O0", "-o", "/work/hold", "/work/hold.c"]).code, 0);
-  const two = ["sh", "-c", "/work/hold & a=$!; /work/hold & b=$!; wait $a; ea=$?; wait $b; echo $ea $?"];
-  // Each process fits the 80 MiB per-process limit; together they exceed the jail's 80 MiB.
-  // systemd stops the whole scope on an OOM kill, so the jail fails as a unit.
-  const r = jail(mounts, two, { limits: { memoryBytes: 80 << 20 } });
-  assert.notEqual(r.code, 0);
-  assert.notEqual(r.stdout.trim(), "0 0");
-  const control = jail(mounts, two, { limits: { memoryBytes: 256 << 20 } });
-  assert.equal(control.stdout.trim(), "0 0", control.stderr);
+  assert.equal(jail(mounts, ["gcc", "-O0", "-o", "/work/pair", "/work/pair.c"]).code, 0);
+  // Two halves of 48 MiB each fit the per-process prlimit but, held at the same
+  // time by the pipe barrier, together exceed the jail's 80 MiB cgroup limit.
+  const r = jail(mounts, ["/work/pair", "48"], { limits: { memoryBytes: 80 << 20 } });
+  assert.notEqual(r.code, 0, `both halves fit under the aggregate limit: ${r.stdout} ${r.stderr}`);
+  const control = jail(mounts, ["/work/pair", "48"], { limits: { memoryBytes: 256 << 20 } });
+  assert.equal(control.code, 0, control.stderr);
 });
 
 test("writable mount paths outside a plain absolute path are refused", () => {
