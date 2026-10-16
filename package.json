@@ -10,6 +10,11 @@
   "scripts": {
     "test": "node --experimental-strip-types --test test/*.test.ts",
     "pipeline": "node --experimental-strip-types src/cli.ts pipeline",
-    "verify": "node --experimental-strip-types src/cli.ts verify"
+    "verify": "node --experimental-strip-types src/cli.ts verify",
+    "typecheck": "tsc -p ."
+  },
+  "devDependencies": {
+    "@types/node": "22.20.5",
+    "typescript": "7.0.2"
   }
 }
