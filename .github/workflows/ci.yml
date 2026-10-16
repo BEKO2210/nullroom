@@ -30,6 +30,16 @@ jobs:
       - name: Allow unprivileged user namespaces
         run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
 
+      # Jails run inside rootless cgroup v2 scopes (memory, pids, cpu), which
+      # need a systemd user manager. The runner has none until lingering is on.
+      - name: Start a systemd user manager
+        run: |
+          sudo loginctl enable-linger "$USER"
+          uid=$(id -u)
+          echo "XDG_RUNTIME_DIR=/run/user/$uid" >> "$GITHUB_ENV"
+          for _ in $(seq 30); do [ -S "/run/user/$uid/bus" ] && break; sleep 1; done
+          XDG_RUNTIME_DIR=/run/user/$uid systemd-run --user --scope --quiet -p TasksMax=4 -p MemoryMax=16M true
+
       - run: npm ci
       - name: Typecheck
         run: npx tsc -p .
