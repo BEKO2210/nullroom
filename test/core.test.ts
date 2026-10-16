@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync, mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -131,4 +131,23 @@ test("wall: abi names are scanned like prose (regression)", () => {
     assert.equal(r.ok, false, to);
     assert.equal(r.hits[0]!.reason, reason, to);
   }
+});
+
+test("audit: a crossed file deleted from the inbox is detected (regression)", () => {
+  const { chain, inbox } = tmpCase();
+  append(chain, "genesis", {});
+  writeFileSync(join(inbox, "SPEC.md"), SPEC);
+  append(chain, "crossing", { file: "SPEC.md", sha256: sha256(SPEC) });
+  rmSync(join(inbox, "SPEC.md"));
+  assert.match(verifyChain(chain, inbox).problems.join(), /inbox\/SPEC.md: crossed but missing/);
+});
+
+test("audit: a symlink in the inbox is rejected even if its target matches", () => {
+  const { chain, inbox } = tmpCase();
+  append(chain, "genesis", {});
+  const real = join(inbox, "..", "elsewhere.md");
+  writeFileSync(real, SPEC);
+  symlinkSync(real, join(inbox, "SPEC.md"));
+  append(chain, "crossing", { file: "SPEC.md", sha256: sha256(SPEC) });
+  assert.match(verifyChain(chain, inbox).problems.join(), /inbox\/SPEC.md: not a regular file/);
 });

@@ -50,7 +50,15 @@ jobs:
       - name: Build artifacts
         id: build
         run: |
-          version=$(node -p 'require("./package.json").version')
+          # Strict SemVer check before the value reaches the shell or GITHUB_OUTPUT.
+          version=$(node -e '
+            const v = require("./package.json").version;
+            if (!/^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(-[0-9A-Za-z.-]+)?$/.test(v)) {
+              console.error(`package.json version is not plain SemVer: ${JSON.stringify(v)}`);
+              process.exit(1);
+            }
+            process.stdout.write(v);
+          ')
           tag="v$version"
           if git ls-remote --exit-code --tags origin "refs/tags/$tag" >/dev/null; then
             echo "tag $tag already exists; bump the version first" >&2; exit 1
@@ -71,7 +79,9 @@ jobs:
         uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
         with:
           subject-path: dist/*
-      - name: Attest SBOM for the source archive
+      # The SBOM describes the dependencies pinned by package-lock.json inside
+      # the archive; it is attested against the archive that ships that lockfile.
+      - name: Attest dependency SBOM for the source archive
         uses: actions/attest-sbom@c604332985a26aa8cf1bdc465b92731239ec6b9e # v4.1.0
         with:
           subject-path: dist/${{ steps.build.outputs.name }}.tar.gz

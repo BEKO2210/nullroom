@@ -3,7 +3,7 @@
 // record breaks every later hash. `verifyChain` also checks that the files in
 // Room B's inbox are byte-for-byte the ones the chain says crossed.
 import { createHash } from "node:crypto";
-import { existsSync, readdirSync, readFileSync } from "node:fs";
+import { existsSync, lstatSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { writeAtomic } from "./fsutil.ts";
 
@@ -60,12 +60,22 @@ export function verifyChain(path: string, inboxDir?: string): ChainVerdict {
   if (inboxDir && existsSync(inboxDir)) {
     const crossed = new Map<string, string>();
     for (const e of chain) if (e.kind === "crossing") crossed.set(String(e.data.file), String(e.data.sha256));
-    for (const f of readdirSync(inboxDir)) {
+    const present = new Set(readdirSync(inboxDir));
+    for (const f of present) {
       const want = crossed.get(f);
-      const got = sha256(readFileSync(join(inboxDir, f)));
-      if (!want) problems.push(`inbox/${f}: never crossed the wall`);
-      else if (want !== got) problems.push(`inbox/${f}: content differs from last crossing`);
+      if (!want) {
+        problems.push(`inbox/${f}: never crossed the wall`);
+        continue;
+      }
+      // Hash only regular files; a symlink could point anywhere on the host.
+      if (!lstatSync(join(inboxDir, f)).isFile()) {
+        problems.push(`inbox/${f}: not a regular file`);
+        continue;
+      }
+      if (sha256(readFileSync(join(inboxDir, f))) !== want) problems.push(`inbox/${f}: content differs from last crossing`);
     }
+    // The other direction: everything that crossed must still be there.
+    for (const f of crossed.keys()) if (!present.has(f)) problems.push(`inbox/${f}: crossed but missing`);
   }
   return { ok: problems.length === 0, entries: chain.length, problems };
 }

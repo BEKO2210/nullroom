@@ -75,7 +75,12 @@ export function runPipeline(i: PipelineInput): Report {
   // an arbitrary path given with --case.
   if (existsSync(p.root)) {
     const st = lstatSync(p.root);
-    const ours = st.isDirectory() && !st.isSymbolicLink() && (readdirSync(p.root).length === 0 || existsSync(p.chain));
+    // Owned means: empty, or holds a chain that verifies and starts with genesis.
+    // A file that merely has the right name is not enough.
+    const ours =
+      st.isDirectory() &&
+      !st.isSymbolicLink() &&
+      (readdirSync(p.root).length === 0 || (existsSync(p.chain) && verifyChain(p.chain).ok));
     if (!ours) throw new Error(`refusing to replace ${p.root}: not empty and not a nullroom case directory`);
   }
   rmSync(p.root, { recursive: true, force: true });
