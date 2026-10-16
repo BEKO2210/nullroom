@@ -2,12 +2,12 @@
 // Rooms are scripted here: each one copies a prepared file inside its own jail,
 // so the run is deterministic and needs no agent credentials. An agent-driven
 // room would issue its commands through the same RoomRunner.
-import { copyFileSync, readFileSync, rmSync } from "node:fs";
+import { copyFileSync, existsSync, lstatSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { basename, join, resolve } from "node:path";
 import { append, readChain, sha256, verifyChain } from "./audit.ts";
 import { readUntrusted, UntrustedFileError, writeAtomic } from "./fsutil.ts";
 import { runOracle, type OracleReport } from "./oracle.ts";
-import { BwrapRunner, casePaths, type CasePaths } from "./sandbox.ts";
+import { assertJailPrerequisites, BwrapRunner, casePaths, type CasePaths } from "./sandbox.ts";
 import { scanWall, type WallHit, type WallReport } from "./wall.ts";
 
 export type FnStatus = "match" | "diverge" | "untested" | "not-built";
@@ -68,7 +68,17 @@ export function functionStatus(fns: string[], oracle: OracleReport | null): Reco
 
 export function runPipeline(i: PipelineInput): Report {
   const p = casePaths(i.caseDir);
-  rmSync(p.root, { recursive: true, force: true }); // generated case output only
+  // Fail on missing prerequisites before touching an existing case directory.
+  assertJailPrerequisites();
+  // The case dir is replaced on every run. Only do that to a directory that is
+  // missing, empty, or one this tool created (it has an audit chain); never to
+  // an arbitrary path given with --case.
+  if (existsSync(p.root)) {
+    const st = lstatSync(p.root);
+    const ours = st.isDirectory() && !st.isSymbolicLink() && (readdirSync(p.root).length === 0 || existsSync(p.chain));
+    if (!ours) throw new Error(`refusing to replace ${p.root}: not empty and not a nullroom case directory`);
+  }
+  rmSync(p.root, { recursive: true, force: true });
   const runner = new BwrapRunner(p);
   const lib = basename(i.targetLib);
   const targetHash = sha256(readFileSync(i.targetLib));

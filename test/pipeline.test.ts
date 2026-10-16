@@ -80,3 +80,23 @@ test("symlinked SPEC.md in the outbox is refused, its target never crosses (regr
   assert.deepEqual(readdirSync(p.inbox), []);
   assert.equal(readChain(p.chain).at(-1)!.kind, "rejected");
 });
+
+test("pipeline refuses to wipe a directory that is not a nullroom case (regression)", () => {
+  const precious = mkdtempSync(join(tmp, "not-a-case-"));
+  writeFileSync(join(precious, "thesis.txt"), "years of work\n");
+  assert.throws(
+    () => runPipeline({ ...base, caseDir: precious, scripted: resolve("scripted/smoke") }),
+    /refusing to replace .*not empty and not a nullroom case directory/,
+  );
+  assert.equal(readFileSync(join(precious, "thesis.txt"), "utf8"), "years of work\n");
+});
+
+test("pipeline reuses its own case directory and an empty one", () => {
+  const dir = join(tmp, "reuse");
+  const first = runPipeline({ ...base, caseDir: dir, scripted: resolve("scripted/smoke") });
+  assert.equal(first.passed, true);
+  const second = runPipeline({ ...base, caseDir: dir, scripted: resolve("scripted/smoke") });
+  assert.equal(second.passed, true);
+  const empty = mkdtempSync(join(tmp, "empty-"));
+  assert.equal(runPipeline({ ...base, caseDir: empty, scripted: resolve("scripted/smoke") }).passed, true);
+});
