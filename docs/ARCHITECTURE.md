@@ -76,9 +76,16 @@ flowchart TB
 | prlimit | Per process: memory, file size, CPU, open files. | `jail limits address space`, `… output file size`, `… open files` |
 | cgroup scope | Whole jail: memory and number of tasks, across all processes. | `jail memory limit holds across processes`, `jail limits the number of tasks` |
 | Timeout | Wall-clock bound; nothing survives it. | `jail timeout leaves no child process` |
+| Writable storage | Every writable mount and `/tmp` is a tmpfs of `storageBytes`. Host content is copied in at start; at the end all processes are stopped and the mounts are exported as one tar on fd 3. The host accepts only regular files and directories inside the mounts, stages them, and swaps them in with `rename`. | `jail bounds total writable storage, with a larger-limit control`, `jail refuses a symlink export and leaves the host directory unchanged` |
 
 `jail()` refuses to run when the cgroup scope cannot be created, instead of
 running with fewer limits.
+
+Accepted residual risk: code in the jail runs as the same user as the export
+wrapper and can reach the wrapper's fd 3 through `/proc`. Anything it writes
+there still has to pass the archive check, so it cannot place files outside
+the writable mounts; at worst it corrupts its own export. Closing this would
+need a non-dumpable wrapper or another PID namespace level.
 
 ## The wall
 
