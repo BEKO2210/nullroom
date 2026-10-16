@@ -53,6 +53,8 @@ jobs:
         run: npm run pipeline
       - name: Verify audit chain
         run: npm run verify work/smoke
+      - name: Demo (isolation, wall, oracle, tamper detection)
+        run: npm run demo
       # Signs the run's report and audit chain with the workflow's identity
       # (Sigstore, keyless). Verify with: gh attestation verify <file> -R BEKO2210/nullroom
       - name: Attest report and audit chain
