@@ -42,7 +42,7 @@ Room B saw and that it never had the binary.
 | ABI grammar | `src/abi.ts` | The only machine-readable part of a spec. Every line must parse; C prototypes are generated from it. |
 | Wall | `src/wall.ts` | A spec carries behavior, not bytes, addresses, machine code or decompiler output. |
 | Audit chain | `src/audit.ts` | Append-only SHA-256 chain over genesis, crossings, rejections, room runs and oracle results. Editing or dropping an entry, or changing a file in Room B's inbox, breaks verification. |
-| Rooms | `src/sandbox.ts` | `RoomRunner` interface; `BwrapRunner` gives each call a fresh mount namespace with no network and only that room's directories. |
+| Rooms | `src/sandbox.ts` | `RoomRunner` interface; `BwrapRunner` gives each call a fresh mount namespace with no network, only that room's directories, and hard memory, file, CPU and open-file limits. |
 | Oracle | `src/oracle.ts` | Room B's code is untrusted: it is compiled and run only inside jails, and the original and the rebuild never share a namespace. Compiler feedback is reduced to file, line and message. |
 | Pipeline | `src/pipeline.ts`, `src/cli.ts` | One run from Room A to `report.json`, with a status per function. |
 
@@ -68,7 +68,7 @@ Linux with `bwrap` (bubblewrap), `gcc`, and Node 22.6 or newer.
 
 ```bash
 targets/smoke/build.sh       # stripped libsmoke.so
-npm test                     # 26 tests: wall, audit, jails, oracle, pipeline
+npm test                     # 35 tests: wall, audit, jails, oracle, pipeline
 npm run pipeline             # full run, writes work/smoke/report.json
 npm run verify work/smoke    # re-check the audit chain and inbox
 ```

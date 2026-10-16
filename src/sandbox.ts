@@ -16,7 +16,21 @@ import { append } from "./audit.ts";
 export type Room = "A" | "B";
 export type Mount = { host: string; at: string; rw: boolean };
 export type RunResult = { code: number; stdout: string; stderr: string };
-export type RunOpts = { extraRo?: Mount[]; net?: boolean; timeoutMs?: number; env?: Record<string, string> };
+export type Limits = { memoryBytes: number; fileBytes: number; cpuSeconds: number; openFiles: number };
+export type RunOpts = {
+  extraRo?: Mount[];
+  net?: boolean;
+  timeoutMs?: number;
+  env?: Record<string, string>;
+  limits?: Partial<Limits>;
+};
+
+export const DEFAULT_LIMITS: Limits = {
+  memoryBytes: 2 * 1024 * 1024 * 1024,
+  fileBytes: 64 * 1024 * 1024,
+  cpuSeconds: 60,
+  openFiles: 256,
+};
 
 export interface RoomRunner {
   run(room: Room, argv: string[], opts?: RunOpts): RunResult;
@@ -66,6 +80,10 @@ const MERGED_USR = [
 ] as const;
 
 export function bwrapArgs(mounts: Mount[], argv: string[], opts: RunOpts = {}): string[] {
+  const limits = { ...DEFAULT_LIMITS, ...opts.limits };
+  for (const [name, value] of Object.entries(limits)) {
+    if (!Number.isInteger(value) || value <= 0) throw new Error(`limit ${name} must be a positive integer`);
+  }
   const a = ["--unshare-all", "--die-with-parent", "--new-session", "--clearenv"];
   if (opts.net) a.push("--share-net");
   for (const d of SYSTEM_RO) if (existsSync(d)) a.push("--ro-bind", d, d);
@@ -74,7 +92,17 @@ export function bwrapArgs(mounts: Mount[], argv: string[], opts: RunOpts = {}): 
   for (const m of [...mounts, ...(opts.extraRo ?? [])]) a.push(m.rw ? "--bind" : "--ro-bind", m.host, m.at);
   a.push("--setenv", "PATH", "/usr/local/bin:/usr/bin:/bin", "--setenv", "HOME", "/tmp/home", "--chdir", "/tmp/home");
   for (const [k, v] of Object.entries(opts.env ?? {})) a.push("--setenv", k, v);
-  return [...a, "--", ...argv];
+  return [
+    ...a,
+    "--",
+    "/usr/bin/prlimit",
+    `--as=${limits.memoryBytes}`,
+    `--fsize=${limits.fileBytes}`,
+    `--cpu=${limits.cpuSeconds}`,
+    `--nofile=${limits.openFiles}`,
+    "--",
+    ...argv,
+  ];
 }
 
 /** One command in a fresh namespace with exactly these mounts. */
