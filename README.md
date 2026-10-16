@@ -69,7 +69,8 @@ target ──ro──▶ Room A ──SPEC.md──▶ Wall ──▶ inbox ─�
 
 - **Rooms** run every command through `jail()`: bubblewrap namespaces inside a
   rootless systemd cgroup scope, with `prlimit` per process. `jail()` refuses
-  to run if the cgroup scope cannot be created.
+  to run if the cgroup scope cannot be created, or if Yama `ptrace_scope` is
+  below 1 (so a jail cannot `ptrace`-attach to the export wrapper).
 - **Wall** (`src/wall.ts`) is a validator with a grammar for the ABI block and
   content rules for everything else.
 - **Oracle** (`src/oracle.ts`) compiles Room B's source against prototypes
