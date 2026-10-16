@@ -33,6 +33,17 @@ export type Abi = { handles: string[]; fns: Fn[] };
 export class AbiError extends Error {}
 
 const IDENT = /^[A-Za-z_][A-Za-z0-9_]*$/;
+// C reserved words cannot be used as function or parameter names: they would
+// produce source that does not compile, which the oracle would mis-report.
+const C_KEYWORDS = new Set(
+  ("auto break case char const continue default do double else enum extern float for goto if inline int " +
+    "long register restrict return short signed sizeof static struct switch typedef union unsigned void " +
+    "volatile while _Bool _Complex _Imaginary bool").split(" "),
+);
+const checkName = (name: string, what: string, fail: (why: string) => never) => {
+  if (!IDENT.test(name)) fail(`bad ${what} name "${name}"`);
+  if (C_KEYWORDS.has(name)) fail(`${what} name is a C keyword: "${name}"`);
+};
 
 export const C_TYPE: Record<Scalar, string> = {
   i32: "int32_t",
@@ -61,7 +72,8 @@ export function parseAbi(text: string): Abi {
     };
     const h = /^handle\s+(\w+)$/.exec(line);
     if (h) {
-      if (!IDENT.test(h[1]!)) fail("bad handle name");
+      checkName(h[1]!, "handle", fail);
+      if (abi.handles.includes(h[1]!)) fail(`duplicate handle "${h[1]}"`);
       abi.handles.push(h[1]!);
       return;
     }
@@ -71,13 +83,19 @@ export function parseAbi(text: string): Abi {
     const parts = m[2]!.trim() ? m[2]!.split(",").map((p) => p.trim()) : [];
     for (const p of parts) {
       const [t, name, extra] = p.split(/\s+/);
-      if (!t || !name || extra || !IDENT.test(name)) fail(`bad param "${p}"`);
+      if (!t || !name || extra) fail(`bad param "${p}"`);
+      checkName(name!, "parameter", fail);
       if ((SCALARS as readonly string[]).includes(t!)) params.push({ kind: "scalar", type: t as Scalar, name: name! });
       else if (t === "in" || t === "len" || t === "out" || t === "cap") params.push({ kind: t, name: name! });
       else if (t!.startsWith("out_") && (SCALARS as readonly string[]).includes(t!.slice(4)))
         params.push({ kind: "outScalar", type: t!.slice(4) as Scalar, name: name! });
       else if (abi.handles.includes(t!)) params.push({ kind: "handle", type: t!, name: name! });
       else fail(`unknown type "${t}"`);
+    }
+    const seen = new Set<string>();
+    for (const p of params) {
+      if (seen.has(p.name)) fail(`duplicate parameter name "${p.name}"`);
+      seen.add(p.name);
     }
     params.forEach((p, j) => {
       const next = params[j + 1];
@@ -97,6 +115,8 @@ export function parseAbi(text: string): Abi {
     }
     if (ret.kind === "free" && !(params.length === 1 && params[0]!.kind === "handle"))
       fail("`free` takes exactly one handle");
+    checkName(m[1]!, "function", fail);
+    if (abi.fns.some((f) => f.name === m[1]!)) fail(`duplicate function "${m[1]}"`);
     abi.fns.push({ name: m[1]!, params, ret });
   });
   if (!abi.fns.length) throw new AbiError("abi declares no functions");
