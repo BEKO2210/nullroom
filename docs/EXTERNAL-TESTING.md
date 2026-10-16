@@ -55,7 +55,7 @@ Pick any of these; each points to the claim and the test behind it.
 | Area | Claim to challenge | Where |
 | --- | --- | --- |
 | Isolation | Room B cannot read the target; jails have no network, no `/home`, empty environment | README "What is enforced", `test/sandbox.test.ts` |
-| Limits | Memory, tasks, storage and file size are bounded per jail | `docs/ARCHITECTURE.md` "Isolation layers" |
+| Limits | Memory, tasks and file size are bounded per jail; `storageBytes` caps each writable mount and `/tmp` separately, with the total bounded by the cgroup `MemoryMax` | `docs/ARCHITECTURE.md` "Isolation layers" |
 | Wall | Code-shaped content is rejected (it is a lexical filter; encoded payloads are a known limit) | `src/wall.ts`, `test/core.test.ts` |
 | Audit | Editing, deleting or adding inbox files, or editing the chain, is detected | `src/audit.ts`, `npm run verify` |
 | Docs | Every statement in README and CHANGELOG matches what the code does | all |
