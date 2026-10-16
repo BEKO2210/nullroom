@@ -1,5 +1,29 @@
 # Dependencies
 
+## Version matrix (reviewed 2026-10-16)
+
+Direct dependencies, actions and the runtime, each against the latest stable
+release at review time. "Stable" excludes alpha, beta, rc, next and nightly.
+
+| Component | Latest stable | In use | Decision |
+| --- | --- | --- | --- |
+| typescript (dev) | 7.0.2 | 7.0.2 | current; no change |
+| @types/node (dev) | 26.6.5 | 22.20.5 (latest in the 22 line) | **held at major 22 on purpose**: it must match the minimum supported Node major (`engines: >=22.6`), or the typecheck would accept APIs missing on Node 22. Dependabot is configured to skip its major bumps. |
+| Node.js runtime | 26.12.0 (Current); LTS 24.22 (Krypton), 22.23 (Jod) | CI floor 22, CI LTS job 24, dev host 24 | supports Node ≥ 22.6 (native type stripping). CI proves both 22 and 24; 20 is excluded (no `--experimental-strip-types`). |
+| actions/checkout | v7.0.1 | v7.0.1 | current |
+| actions/setup-node | v7.1.0 | v7.1.0 | current |
+| actions/upload-artifact | v7.0.2 | v7.0.2 | current |
+| actions/attest-build-provenance | v4.2.2 | v4.2.2 | current |
+| actions/attest-sbom | v4.1.0 | v4.1.0 | current |
+| github/codeql-action | codeql-bundle-v2.27.2 | v2.27.2 | current |
+
+No runtime npm dependencies exist, so there is no transitive runtime tree to
+update. The dev tree is `typescript` and `@types/node` plus `undici-types`
+(pulled by `@types/node`); `npm audit` reports 0 vulnerabilities.
+
+Dependabot PR to bump `@types/node` to 26 was declined for the reason above;
+the ignore rule in `.github/dependabot.yml` stops it from reopening.
+
 ## Ubuntu 24.04 bootstrap
 
 Tested on a clean Ubuntu 24.04 host. Each line maps to a `doctor` check.
@@ -53,7 +77,7 @@ Checked by `npm run doctor`; fixes in [TROUBLESHOOTING.md](TROUBLESHOOTING.md).
 | Requirement | Used for | Tested on |
 | --- | --- | --- |
 | Linux, cgroup v2 | everything | Ubuntu 24.04 (CI runner and a desktop host) |
-| Node.js ≥ 22.6 | runtime (type stripping) | Node 22 (CI), Node 24 (host) |
+| Node.js ≥ 22.6 | runtime (type stripping) | Node 22 and Node 24 (both in CI), Node 24 (dev host) |
 | bubblewrap, unprivileged user namespaces | jails | bubblewrap 0.9.0 |
 | systemd user manager with cgroup delegation | whole-jail limits | systemd 255 |
 | Yama `ptrace_scope` ≥ 1 | jail preflight | value 1 |
