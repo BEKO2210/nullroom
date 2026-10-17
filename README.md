@@ -8,10 +8,62 @@ decides what may cross. A second room writes a new implementation from the
 spec alone. An oracle compares the new library with the original. Every step
 is recorded in a SHA-256 hash chain, and CI signs the result.
 
-The point is not the reimplementation itself. The point is that the claims a
-clean-room process depends on — *Room B never had the binary*, *only behavior
-crossed*, *the verdict came from running both libraries* — are enforced by the
-system and covered by tests, not by convention.
+The point is not the reimplementation itself. It is to turn parts of a
+clean-room process from convention into checkable records. Concretely, and no
+more than this:
+
+- **Room B had no runtime access to the original** — its sandbox has no mount
+  of it, so every path returns `ENOENT` (a test checks this). This is a runtime
+  filesystem fact, not a claim about what a model may have seen in training.
+- **What crossed the wall is logged and passed its lexical checks** — the spec
+  is scanned (no hex, registers, instructions, decompiler names or code-shaped
+  lines) and hashed. This is a lexical filter, not a proof: plain prose, some
+  ordinary C-like text, or an encoded payload can still pass (see Scope and
+  limits). It reduces accidental code leakage; it does not guarantee none.
+- **The log is internally consistent and its CI copy is attested** — a SHA-256
+  hash chain links the entries and is checked against Room B's inbox, so a
+  *piecemeal* edit is caught. Anyone who can rewrite the whole file can
+  recompute a consistent chain, so the externally verifiable copy is the one CI
+  signs with Sigstore on `main`. It shows log integrity, not the absence of a
+  side channel.
+- **The verdict came from running both libraries** on a fixed test driver.
+
+Nullroom does **not** prove a complete information barrier or that the rebuild
+is generally equivalent to the original. See [Scope and limits](#scope-and-limits).
+
+## For a reviewer, in two minutes
+
+- **What it explores:** can the claims a clean-room reimplementation relies on
+  be turned from convention into records a machine checks? (It is an
+  experimental prototype on a bundled sample library, Linux only — not a
+  product. There is a direct competitor, `cleanroom-mcp`; see
+  [docs/PRODUCT-DISCOVERY.md](docs/PRODUCT-DISCOVERY.md).)
+- **What is actually implemented:** a strict spec grammar + lexical wall
+  (`src/wall.ts`); a SHA-256 audit chain with verification (`src/audit.ts`);
+  bubblewrap jails inside a rootless cgroup v2 scope with per-process and
+  per-jail limits and a validated writable-tmpfs export (`src/sandbox.ts`); a
+  behavioral oracle compiling the rebuild and diffing it against the original
+  in separate jails (`src/oracle.ts`); an end-to-end pipeline, CLI and demo.
+  ~1,200 lines of TypeScript, run on Node's native type stripping, zero runtime
+  dependencies.
+- **Security bugs found by independent review and fixed** — some by the
+  independent AI audits, some during implementation — each with a regression
+  test that fails on the pre-fix code: per-process limits
+  multiplying across `fork`; a non-atomic host swap; a forged-chain directory
+  deletion via `--case`; a whole-inbox deletion that still verified; a seeding
+  failure overwriting host data; an oracle crash on `null` output. See the
+  [engineering report](docs/ENGINEERING-REPORT.md).
+- **How quality is enforced:** 69 tests on Node 22 and 24, strict typecheck,
+  `npm audit`, CodeQL, an end-to-end run and the demo — all required on every
+  PR; `main` is protected with three required checks; CI signs `report.json`
+  and the audit chain with Sigstore and publishes a CycloneDX SBOM.
+- **Limits:** see [Scope and limits](#scope-and-limits) — lexical wall (encoded
+  payloads pass), fixed-case oracle, scripted rooms, Linux only, and the honest
+  bound on what the audit chain proves.
+- **Who did what:** directed and decided by one person; code written by AI
+  agents; reviewed independently by a different AI model and by CI. Spelled out
+  in [How this project was built](#how-this-project-was-built), with no human
+  authorship claimed that did not happen.
 
 ## Demo
 
@@ -45,13 +97,13 @@ PASSED
 
 | Property | How | Test |
 | --- | --- | --- |
-| Room B cannot read the target | Its mount namespace has no mount of it; any path gives `ENOENT`. | `room B cannot see the binary at any path (ENOENT)` |
+| Room B has no runtime access to the target | Its mount namespace has no mount of it; the tested paths, including the host path, and a filesystem-wide search give `ENOENT`. (Runtime filesystem access only — not a claim about model training data.) | `room B cannot see the binary at any path (ENOENT)` |
 | The spec carries no code-shaped content | The wall accepts prose plus a strict ABI grammar and rejects hex, registers, instructions, decompiler names and code-shaped lines, ABI names included. This is a lexical policy, not a proof: it does not stop content hidden in an arbitrary encoding (see Scope and limits). | `wall: forbidden content is rejected`, `wall: abi names are scanned like prose` |
 | What was checked is what crossed | `SPEC.md` is read once without following symlinks; those exact bytes are scanned, hashed and copied. | `symlinked SPEC.md in the outbox is refused …` |
-| Room B's code never runs on the host | Builds and runs happen in jails with no network, no `/home`, empty environment; original and rebuild never share a jail. | `oracle jail: no host environment, no /home, only one library` |
-| A jail cannot exhaust the host | Per process (`prlimit`) and per jail (cgroup v2 scope): memory, tasks, CPU, file size, open files. | `jail memory limit holds across processes, not just per process` and the other `jail …` tests in `test/sandbox.test.ts` |
-| A jail cannot fill the host disk | Writable mounts and `/tmp` are size-limited tmpfs; the result is exported as a checked archive (regular files and directories inside the mounts only) and swapped in with `rename`, atomically per mount (not across several mounts). | `jail bounds total writable storage, with a larger-limit control`, `jail refuses a symlink export …` |
-| The record is tamper-evident | Hash chain over every room run, crossing and verdict; inbox files are checked against it. | `audit: edited or removed entries break the chain`, `tampering with the inbox after the run is detected` |
+| Room B's code runs only inside a jail | Builds and runs happen in jails (host processes in a namespace) with no network, no `/home`, empty environment; original and rebuild never share a jail. | `oracle jail: no host environment, no /home, only one library` |
+| A jail's resources are bounded | Per process (`prlimit`) and per jail (cgroup v2 scope): memory, tasks, CPU rate, file size, open files — finite caps, not an exhaustion-proof guarantee. | `jail memory limit holds across processes, not just per process` and the other `jail …` tests in `test/sandbox.test.ts` |
+| A jail's writable storage is bounded | Writable mounts and `/tmp` are size-limited tmpfs; the result is exported as a checked archive (regular files and directories inside the mounts only) and swapped in with `rename`, atomically per mount (not across several mounts). | `jail bounds total writable storage, with a larger-limit control`, `jail refuses a symlink export …` |
+| The log is tamper-evident | SHA-256 hash chain over every room run, crossing and verdict; inbox files are checked against it. Detects later edits to the log; it does not prove the absence of side channels. | `audit: edited or removed entries break the chain`, `tampering with the inbox after the run is detected` |
 | CI results have provenance | `report.json` and `audit_chain.json` are attested with Sigstore on `main`. | `gh attestation verify report.json -R BEKO2210/nullroom` |
 | A wrong rebuild fails | Off-by-one faults, a changed flag bit and a wrong signature are caught. | `test/oracle.test.ts`, `test/pipeline.test.ts` |
 
