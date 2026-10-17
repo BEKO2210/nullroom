@@ -4,12 +4,23 @@ A technical walkthrough for readers evaluating the project — how it is built,
 which decisions were made and why, what went wrong, and how to check the
 claims. Everything here is backed by code, tests or CI runs you can inspect.
 
+**Status: feature-frozen** after a product-discovery pass found the niche
+already occupied (`cleanroom-mcp`) and the headline claim too strong; see
+[docs/PRODUCT-DISCOVERY.md](PRODUCT-DISCOVERY.md). The value on show is the
+engineering, not a market. What the audit chain proves is deliberately narrow:
+the *integrity of the logged crossings* (a piecemeal edit is caught; a full
+rewrite is not, which is why the CI copy is Sigstore-attested). Separately, the
+wall applied its *lexical checks* at crossing time (no hex, registers,
+instructions or code-shaped lines — a filter, not a proof), and Room B had *no
+runtime filesystem access* to the original. None of this shows that no side
+channel existed, nor anything about a model's training data.
+
 ## Problem
 
 Clean-room reimplementation is a known method: one party describes a system's
 behavior, a second party rebuilds it from that description without seeing the
 original, and the two are compared. Its value rests on claims that are easy to
-assert and hard to prove: that the second party never saw the original, that
+assert and hard to prove: that the second party had no runtime access to the original, that
 only behavior crossed between them, that the verdict came from real execution.
 In most write-ups these are social promises. Nullroom's goal was narrower and
 checkable: **make those claims properties the system enforces and tests cover,
@@ -33,7 +44,7 @@ otherwise carry an address across.
 
 **An oracle that never trusts Room B's code on the host.** Room B's source is
 compiled and run only inside jails. The original and the rebuild never share a
-namespace, so the rebuild cannot read the original. The verdict is a diff of
+namespace, so the rebuild has no runtime access to the original. The verdict is a diff of
 two JSON transcripts from a fixed driver.
 
 **A hash chain for evidence, Sigstore for provenance.** The chain proves
@@ -100,8 +111,8 @@ regression test that fails on the pre-fix code.
 
 ## CI and test results
 
-As of `main` at the latest run: 63 tests (core 14, sandbox 26, oracle 6,
-pipeline 8, cli 9), strict typecheck, `npm audit` clean, end-to-end pipeline and
+As of `main` at the latest run: 69 tests (core 16, sandbox 27, oracle 7,
+pipeline 10, cli 9), on Node 22 and Node 24, strict typecheck, `npm audit` clean, end-to-end pipeline and
 chain verification, Sigstore attestation on `main`. Every PR runs the same
 checks on both the push and the merge commit; `main` is protected and requires
 the `test` check. See the [engineering report](ENGINEERING-REPORT.md) for

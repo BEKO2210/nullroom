@@ -11,7 +11,7 @@ npm ci
 targets/smoke/build.sh
 npm run typecheck          # strict tsc, expect 0 errors
 npm run doctor             # expect 8 checks ok
-npm test                   # expect 60 pass, 0 fail
+npm test                   # expect 69 pass, 0 fail
 npm run demo               # expect "every check behaved as expected"
 npm run pipeline           # expect PASSED, 10 functions "match"
 npm run verify work/smoke  # expect "valid, 5 entries"
@@ -28,7 +28,7 @@ gh attestation verify report.json -R BEKO2210/nullroom
 
 | Check | Result | Evidence |
 | --- | --- | --- |
-| Tests | 60 pass, 0 fail (core 12, sandbox 26, oracle 6, pipeline 7, cli 9) | CI run [38953527892](https://github.com/BEKO2210/nullroom/actions/runs/38953527892) |
+| Tests | 69 pass, 0 fail (core 16, sandbox 27, oracle 7, pipeline 10, cli 9), Node 22 and 24 | CI run [38985037020](https://github.com/BEKO2210/nullroom/actions/runs/38985037020) |
 | Clean-clone reproduction | empty environment (`env -i`), fresh clone: install, build, typecheck, 49/49 tests (at `46b15d0`), pipeline, verify all pass; `libsmoke.so` sha256 identical to the developer build | local run, 2026-10-16 |
 | Typecheck | `tsc` strict, `noUncheckedIndexedAccess`, 0 errors | same run |
 | Dependencies | 2 dev dependencies (`typescript`, `@types/node`), 0 runtime; `npm audit` 0 vulnerabilities | same run |
